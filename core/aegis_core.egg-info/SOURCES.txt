@@ -12,4 +12,6 @@ aegis_core/services/compliance.py
 aegis_core/services/pareto.py
 aegis_core/services/planner.py
 aegis_core/services/risk.py
+tests/test_pareto.py
 tests/test_planner.py
+tests/test_search.py

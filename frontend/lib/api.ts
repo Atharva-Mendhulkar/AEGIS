@@ -65,6 +65,22 @@ export interface Plan {
   gross_vehicle_weight_kg: number;
   cargo_weight_kg: number;
   capacity_utilisation_pct: number;
+  // Fuel / operating cost breakdown (real ₹)
+  fuel_type: string;
+  fuel_cost_inr: number;
+  fuel_consumption: number;
+  fuel_unit: string;
+  fuel_price_per_unit: number;
+  toll_cost_inr: number;
+  driver_cost_inr: number;
+  total_operating_cost_inr: number;
+  market_freight_cost_inr: number;
+  distance_km: number;
+  // EV-specific
+  ev_charging_stops: number;
+  ev_charging_stop_nodes: string[];
+  ev_charger_available: boolean;
+  ev_range_km: number;
   // Risk intelligence
   potential_risks: DisruptionInfo[];
   risk_score: number;
@@ -166,13 +182,15 @@ export async function createPlan(
   shipmentId: string,
   truckClass: string = "hcv",
   maxPayloadKg?: number,
-  gvwKg?: number
+  gvwKg?: number,
+  fuelType: string = "diesel"
 ): Promise<Plan[]> {
   return request("/v1/plan", {
     method: "POST",
     body: JSON.stringify({
       shipment_id: shipmentId,
       truck_class: truckClass,
+      fuel_type: fuelType,
       ...(maxPayloadKg ? { max_payload_kg: maxPayloadKg } : {}),
       ...(gvwKg ? { gross_vehicle_weight_kg: gvwKg } : {}),
     }),

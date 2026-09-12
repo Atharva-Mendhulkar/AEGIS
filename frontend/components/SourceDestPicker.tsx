@@ -13,10 +13,13 @@ import {
   Sparkles,
   Building2,
   AlertTriangle,
+  Fuel,
+  Zap,
 } from "lucide-react";
 import type { Depot, TruckClass } from "../lib/api";
 import { searchAddress, type GeocodedLocation } from "../lib/geocoding";
 import type { CustomLocation } from "../lib/dynamicGraph";
+import { FUEL_META, type FuelType } from "../lib/constants";
 
 interface Props {
   depots: Depot[];
@@ -27,6 +30,7 @@ interface Props {
   maxPayloadKg: number | undefined;
   gvwKg: number | undefined;
   truckClasses: TruckClass[];
+  fuelType: FuelType;
   onSourceSelect: (loc: CustomLocation) => void;
   onDestSelect: (loc: CustomLocation) => void;
   onSwap: () => void;
@@ -34,6 +38,7 @@ interface Props {
   onTruckClassChange: (cls: string) => void;
   onMaxPayloadChange: (kg: number | undefined) => void;
   onGvwChange: (kg: number | undefined) => void;
+  onFuelTypeChange: (fuel: FuelType) => void;
   onPresetSelect: (src: CustomLocation, dst: CustomLocation) => void;
 }
 
@@ -46,6 +51,7 @@ export function SourceDestPicker({
   maxPayloadKg,
   gvwKg,
   truckClasses,
+  fuelType,
   onSourceSelect,
   onDestSelect,
   onSwap,
@@ -53,6 +59,7 @@ export function SourceDestPicker({
   onTruckClassChange,
   onMaxPayloadChange,
   onGvwChange,
+  onFuelTypeChange,
   onPresetSelect,
 }: Props) {
   // Source search state
@@ -566,6 +573,82 @@ export function SourceDestPicker({
             </>
           )}
         </select>
+      </div>
+
+      {/* ── Fuel / Propulsion Type (real Indian pricing) ──────────────── */}
+      <div className="form-group">
+        <label className="form-label">
+          <Fuel size={11} style={{ color: "#16a34a" }} /> Fuel Type
+          <span
+            style={{
+              marginLeft: 6,
+              fontSize: "0.65rem",
+              background: "rgba(22,163,74,0.08)",
+              color: "#16a34a",
+              padding: "1px 6px",
+              borderRadius: 9999,
+              fontWeight: 600,
+            }}
+          >
+            {FUEL_META[fuelType].priceLabel}
+          </span>
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+          {(Object.keys(FUEL_META) as FuelType[]).map((key) => {
+            const meta = FUEL_META[key];
+            const active = fuelType === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onFuelTypeChange(key)}
+                style={{
+                  padding: "7px 4px",
+                  borderRadius: 8,
+                  border: `1px solid ${active ? meta.color : "var(--border)"}`,
+                  background: active ? `${meta.color}14` : "transparent",
+                  color: active ? meta.color : "var(--text-secondary)",
+                  fontWeight: active ? 700 : 600,
+                  fontSize: "0.72rem",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 2,
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <span>{meta.label}</span>
+                <span style={{ fontSize: "0.6rem", opacity: 0.8 }}>{meta.priceLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div
+          style={{
+            fontSize: "0.68rem",
+            color: "#64748b",
+            marginTop: 4,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 4,
+          }}
+        >
+          {fuelType === "electric" ? (
+            <>
+              <Zap size={11} style={{ color: "#16a34a", flexShrink: 0, marginTop: 1 }} />
+              <span>
+                EV mode checks corridor charging stations (Tata Power / EESL / EVYATRA) and
+                plans charging stops based on the truck&apos;s real range per charge.
+              </span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={11} style={{ color: "#f59e0b", flexShrink: 0, marginTop: 1 }} />
+              <span>{FUEL_META[fuelType].note}. Rates updated monthly from IOCL metro pumps.</span>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Payload & GVW overrides */}

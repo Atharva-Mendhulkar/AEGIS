@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import heapq
+import math
 import time
 from collections import deque
 from typing import Any
@@ -35,6 +36,7 @@ from .schemas import (
     PlanResponse,
     TraceRequest,
 )
+from .fuel_service import compute_fuel_cost
 from .store import store
 
 app = FastAPI(title="AEGIS API", version="0.1.0")
@@ -113,16 +115,32 @@ def _aggregate_risk_score(risks: list[DisruptionInfo]) -> float:
     return min(total, 1.0)
 
 
-def _recommendation(is_best: bool, risk_score: float, utilisation: float) -> str:
+def _recommendation(
+    is_best: bool,
+    risk_score: float,
+    utilisation: float,
+    fuel_type: str = "diesel",
+    ev_charger_available: bool = True,
+    ev_stops: int = 0,
+) -> str:
     if is_best:
         parts = ["✅ Recommended route"]
         if risk_score > 0.5:
             parts.append("— monitor active disruptions")
         if utilisation > 90:
             parts.append("— truck near capacity limit")
+        if fuel_type == "electric":
+            if not ev_charger_available:
+                parts.append("— ⚠ insufficient DC fast chargers for required stops")
+            elif ev_stops > 0:
+                parts.append(f"— {ev_stops} charging stop(s) planned")
+            else:
+                parts.append("— within single-charge EV range")
         return ". ".join(parts) + "."
     if risk_score >= 0.75:
         return "⚠ High disruption risk — consider alternate corridor."
+    if fuel_type == "electric" and not ev_charger_available:
+        return "⚠ Corridor lacks enough EV fast chargers — avoid for electric fleets."
     if risk_score >= 0.5:
         return "⚠ Moderate risk — re-check before dispatch."
     return "Alternative viable route."
@@ -134,6 +152,58 @@ def _resolve_truck(request: PlanRequest) -> tuple[int, int]:
     max_payload = request.max_payload_kg or cls["max_payload_kg"]
     gvw = request.gross_vehicle_weight_kg or cls["max_gvw_kg"]
     return int(max_payload), int(gvw)
+
+
+# Road distance ≈ 1.25 × great-circle (empirical factor for the Indian NH grid)
+ROAD_CIRCUITY_FACTOR: float = 1.25
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two WGS-84 points, in km."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 2 * 6371.0088 * math.asin(math.sqrt(a))
+
+
+def _plan_leg_stats(route_ids: list[str]) -> tuple[float, float]:
+    """Return (distance_km, transit_hours) for a plan's route legs.
+
+    Distance uses real depot coordinates (haversine × road-circuity factor),
+    so fuel costs are computed on actual road kilometres, not abstract units.
+    """
+    graph = store.graph
+    depots = {d.id: d for d in graph.depots}
+    routes = {r.id: r for r in graph.routes}
+    distance = 0.0
+    hours = 0.0
+    for rid in route_ids:
+        route = routes.get(rid)
+        if route is None:
+            continue
+        hours += route.time_hours
+        origin = depots.get(route.origin_id)
+        dest = depots.get(route.destination_id)
+        if origin is not None and dest is not None:
+            distance += _haversine_km(
+                origin.latitude, origin.longitude, dest.latitude, dest.longitude
+            ) * ROAD_CIRCUITY_FACTOR
+    return distance, hours
+
+
+def _nodes_for_route(route_ids: list[str]) -> list[str]:
+    """Ordered depot-node IDs traversed by a plan (for EV charger lookup)."""
+    routes = {r.id: r for r in store.graph.routes}
+    nodes: list[str] = []
+    for rid in route_ids:
+        route = routes.get(rid)
+        if route is None:
+            continue
+        if not nodes or nodes[-1] != route.origin_id:
+            nodes.append(route.origin_id)
+        nodes.append(route.destination_id)
+    return nodes
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +261,17 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
         risk_score = _aggregate_risk_score(risks)
         utilisation = round((cargo_kg / max_payload_kg) * 100, 1)
 
+        # ── Real-world fuel / operating cost (₹) ─────────────────────────
+        distance_km, transit_hours = _plan_leg_stats(plan.route_ids)
+        fuel = compute_fuel_cost(
+            truck_class=request.truck_class,
+            fuel_type=request.fuel_type,
+            distance_km=distance_km,
+            time_hours=transit_hours,
+            cargo_weight_kg=cargo_kg,
+            route_node_ids=_nodes_for_route(plan.route_ids),
+        )
+
         responses.append(PlanResponse(
             id=str(plan.id),
             shipment_id=plan.shipment_id,
@@ -203,26 +284,54 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
             gross_vehicle_weight_kg=gvw_kg,
             cargo_weight_kg=cargo_kg,
             capacity_utilisation_pct=utilisation,
+            fuel_type=request.fuel_type,
+            fuel_cost_inr=round(fuel.fuel_cost_inr, 2),
+            fuel_consumption=round(fuel.fuel_consumption, 2),
+            fuel_unit=fuel.fuel_unit,
+            fuel_price_per_unit=fuel.fuel_price_per_unit,
+            toll_cost_inr=round(fuel.toll_cost_inr, 2),
+            driver_cost_inr=round(fuel.driver_cost_inr, 2),
+            total_operating_cost_inr=round(fuel.total_operating_cost_inr, 2),
+            market_freight_cost_inr=round(fuel.market_freight_cost_inr, 2),
+            distance_km=round(distance_km, 1),
+            ev_charging_stops=fuel.ev_charging_stops,
+            ev_charging_stop_nodes=fuel.ev_charging_stop_nodes,
+            ev_charger_available=fuel.ev_charger_available,
+            ev_range_km=fuel.ev_range_km,
             potential_risks=risks,
             risk_score=risk_score,
         ))
 
     # ── Pick "best" route ────────────────────────────────────────────────
-    # Score = 0.5 * normalised_cost + 0.5 * risk_score  (lower is better)
-    max_cost = max(p.total_cost for p in responses) or 1.0
-    min_cost = min(p.total_cost for p in responses)
-    cost_range = max_cost - min_cost or 1.0
+    # Optimisation is fuel-aware: we score on real ₹ operating cost
+    # (fuel at live pump prices + toll + driver wages) blended with risk,
+    # not on the abstract planner cost units. Electric routes whose
+    # corridor lacks enough DC fast chargers get a hard penalty so the
+    # optimiser prefers EV-feasible corridors.
+    max_op = max(p.total_operating_cost_inr for p in responses) or 1.0
+    min_op = min(p.total_operating_cost_inr for p in responses)
+    op_range = max_op - min_op or 1.0
 
     def combined_score(p: PlanResponse) -> float:
-        norm_cost = (p.total_cost - min_cost) / cost_range
-        return 0.5 * norm_cost + 0.5 * p.risk_score
+        norm_op_cost = (p.total_operating_cost_inr - min_op) / op_range
+        score = 0.5 * norm_op_cost + 0.5 * p.risk_score
+        if p.fuel_type == "electric" and p.ev_charging_stops > 0 and not p.ev_charger_available:
+            score += 0.35  # corridor cannot support required charging stops
+        return score
 
     best = min(responses, key=combined_score)
     best.is_best = True
 
     for p in responses:
         utilisation = p.capacity_utilisation_pct
-        p.recommendation = _recommendation(p.is_best, p.risk_score, utilisation)
+        p.recommendation = _recommendation(
+            p.is_best,
+            p.risk_score,
+            utilisation,
+            fuel_type=p.fuel_type,
+            ev_charger_available=p.ev_charger_available,
+            ev_stops=p.ev_charging_stops,
+        )
 
     # ── Persist & return ─────────────────────────────────────────────────
     for plan in raw_plans:

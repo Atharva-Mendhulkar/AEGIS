@@ -16,6 +16,9 @@ import {
   Shield,
   Weight,
   Zap,
+  Fuel,
+  BatteryCharging,
+  MapPin,
 } from "lucide-react";
 import type { Plan, GraphInput } from "../lib/api";
 import { riskColor } from "../lib/constants";
@@ -29,6 +32,78 @@ const SEVERITY_COLOR: Record<string, string> = {
   High: "#ea580c",
   Critical: "#dc2626",
 };
+
+/** EV charging-stop plan with depot charger info (EVYATRA / Tata Power / EESL). */
+function EvChargingPlan({ plan, graph }: { plan: Plan; graph: GraphInput }) {
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "8px 10px",
+        borderRadius: 8,
+        background: plan.ev_charger_available ? "rgba(22,163,74,0.06)" : "rgba(220,38,38,0.06)",
+        border: `1px solid ${plan.ev_charger_available ? "rgba(22,163,74,0.2)" : "rgba(220,38,38,0.25)"}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: "0.78rem",
+          fontWeight: 700,
+          color: plan.ev_charger_available ? "#15803d" : "#dc2626",
+        }}
+      >
+        <BatteryCharging size={13} />
+        {plan.ev_charging_stops === 0
+          ? "Single-charge range — no charging stops needed"
+          : `${plan.ev_charging_stops} charging stop${plan.ev_charging_stops > 1 ? "s" : ""} required (${plan.ev_range_km.toFixed(0)} km/charge)`}
+      </div>
+      {plan.ev_charging_stop_nodes.length > 0 && (
+        <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {plan.ev_charging_stop_nodes.map((nodeId) => {
+            const depot = graph.depots.find((d) => d.id === nodeId);
+            return (
+              <span
+                key={nodeId}
+                style={{
+                  fontSize: "0.65rem",
+                  padding: "2px 8px",
+                  borderRadius: 9999,
+                  background: "rgba(22,163,74,0.12)",
+                  color: "#15803d",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                }}
+              >
+                <MapPin size={9} />⚡ {depot?.name || nodeId}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {!plan.ev_charger_available && (
+        <div
+          style={{
+            fontSize: "0.7rem",
+            color: "#dc2626",
+            fontWeight: 600,
+            marginTop: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <AlertTriangle size={11} />
+          Corridor has fewer working DC fast chargers than required stops — planner deprioritised this route.
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   plans: Plan[];
@@ -99,10 +174,14 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
       <div className="metric-grid">
         <div className="metric-card" style={{ borderLeft: "3px solid #2563eb" }}>
           <div className="metric-label">
-            <DollarSign size={12} style={{ color: "#2563eb" }} /> Cost
+            <DollarSign size={12} style={{ color: "#2563eb" }} /> Operating Cost
           </div>
-          <div className="metric-value">₹{plan.total_cost.toFixed(1)}</div>
-          <div className="metric-sub">{plan.route_ids.length} corridor hops</div>
+          <div className="metric-value">
+            ₹{(plan.total_operating_cost_inr || plan.total_cost).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+          </div>
+          <div className="metric-sub">
+            {plan.distance_km ? `${plan.distance_km.toFixed(0)} km · fuel + toll + driver` : `${plan.route_ids.length} corridor hops`}
+          </div>
         </div>
 
         <div className="metric-card" style={{ borderLeft: "3px solid #dc2626" }}>
@@ -121,6 +200,118 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
           <div className="metric-sub">Transit est.</div>
         </div>
       </div>
+
+      {/* Fuel & Operating Cost Breakdown (real Indian rates) */}
+      {plan.distance_km > 0 && (
+        <div className="card animate-fade-in" style={{ padding: "12px 16px" }}>
+          <div className="card-header" style={{ marginBottom: 8 }}>
+            <h2 style={{ fontSize: "0.82rem" }}>
+              <Fuel size={13} style={{ color: "#16a34a" }} /> Fuel &amp; Operating Cost
+            </h2>
+            <span
+              style={{
+                fontSize: "0.65rem",
+                background: "rgba(22,163,74,0.08)",
+                color: "#16a34a",
+                padding: "2px 7px",
+                borderRadius: 9999,
+                fontWeight: 700,
+                textTransform: "capitalize",
+              }}
+            >
+              {plan.fuel_type}
+            </span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600 }}>Distance</div>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
+                {plan.distance_km.toFixed(0)} km
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600 }}>
+                {plan.fuel_unit === "kWh" ? "Energy" : "Fuel Used"}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
+                {plan.fuel_consumption.toLocaleString("en-IN", { maximumFractionDigits: 1 })} {plan.fuel_unit}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600 }}>
+                {plan.fuel_unit === "kWh" ? "Charger Tariff" : "Pump Price"}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
+                ₹{plan.fuel_price_per_unit.toFixed(2)}/{plan.fuel_unit === "kWh" ? "kWh" : "L"}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600 }}>Fuel Cost</div>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#16a34a" }}>
+                ₹{plan.fuel_cost_inr.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600 }}>NH Toll</div>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
+                ₹{plan.toll_cost_inr.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600 }}>Driver (AITWA)</div>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
+                ₹{plan.driver_cost_inr.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+          </div>
+
+          {/* Market freight benchmark */}
+          {plan.market_freight_cost_inr > 0 && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "7px 10px",
+                borderRadius: 8,
+                background: "rgba(37,99,235,0.05)",
+                border: "1px solid rgba(37,99,235,0.15)",
+                fontSize: "0.72rem",
+                color: "#1d4ed8",
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>Spot-market freight benchmark (₹/tonne-km)</span>
+              <span style={{ fontFamily: "var(--font-mono)" }}>
+                ₹{plan.market_freight_cost_inr.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </span>
+            </div>
+          )}
+
+          {/* EV charging plan */}
+          {plan.fuel_type === "electric" && <EvChargingPlan plan={plan} graph={graph} />}
+
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 8,
+              borderTop: "1px solid var(--border-light)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+            }}
+          >
+            <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>
+              TOTAL TRIP COST (FUEL + TOLL + DRIVER)
+            </span>
+            <span style={{ fontSize: "1rem", fontWeight: 800, color: "#0f172a", fontFamily: "var(--font-mono)" }}>
+              ₹{plan.total_operating_cost_inr.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Truck Capacity Card */}
       {plan.truck_class && (

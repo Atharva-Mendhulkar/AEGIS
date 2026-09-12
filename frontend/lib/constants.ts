@@ -161,3 +161,70 @@ export const MAP_CONFIG = {
   tileAttribution:
     '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
 } as const;
+
+/* ── Real-life Indian fuel pricing & truck economics ──────────── */
+/* Sources: IOCL/BPCL metro pump prices (Sep 2024), SIAM/IRTSA    */
+/* mileage field data, NHAI toll schedule, AITWA wage scale,      */
+/* LEADS/CRISIL spot freight rates, EVYATRA/Tata Power chargers.  */
+
+export type FuelType = "diesel" | "petrol" | "electric";
+
+export const FUEL_META: Record<
+  FuelType,
+  {
+    label: string;
+    priceLabel: string;
+    pricePerUnit: number;
+    unit: string;
+    note: string;
+    color: string;
+  }
+> = {
+  diesel: {
+    label: "Diesel",
+    priceLabel: "₹91.50 / L",
+    pricePerUnit: 91.5,
+    unit: "litres",
+    note: "IOCL metro average — most Indian freight trucks run diesel",
+    color: "#0f172a",
+  },
+  petrol: {
+    label: "Petrol",
+    priceLabel: "₹96.72 / L",
+    pricePerUnit: 96.72,
+    unit: "litres",
+    note: "IOCL metro average — only viable for small LCVs",
+    color: "#b45309",
+  },
+  electric: {
+    label: "Electric",
+    priceLabel: "₹9.00 / kWh",
+    pricePerUnit: 9.0,
+    unit: "kWh",
+    note: "EESL / Tata Power highway DC fast-charger tariff",
+    color: "#16a34a",
+  },
+};
+
+/* Depots with known EV charging infrastructure (EVYATRA / Tata    */
+/* Power / EESL / state DISCOM stations, Sep 2024 snapshot).       */
+export const EV_CHARGING_DEPOTS: Record<string, string> = {
+  delhi: "Tata Power + EESL + DMRC hub chargers",
+  mumbai: "BEST + Tata Power + EESL",
+  bangalore: "BESCOM + Tata Power",
+  hyderabad: "TSREDCO highway stations",
+  pune: "Mahadiscom + Tata Power",
+  ahmedabad: "PGVCL stations",
+  jaipur: "Rajasthan EV Mission hubs",
+  chennai: "TANGEDCO hubs",
+  kolkata: "WBSEDCL stations",
+  lucknow: "UPCL pilot stations",
+};
+
+export function hasEvCharging(depotId: string): boolean {
+  return depotId in EV_CHARGING_DEPOTS;
+}
+
+export function formatInr(value: number): string {
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}

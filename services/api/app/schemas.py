@@ -73,6 +73,12 @@ class PlanRequest(BaseModel):
         ),
     )
 
+    # Fuel / propulsion type
+    fuel_type: str = Field(
+        default="diesel",
+        description="Propulsion type: diesel | petrol | electric",
+    )
+
 
 class CompareRequest(BaseModel):
     shipment_id: str
@@ -104,7 +110,7 @@ class DisruptionInfo(BaseModel):
 
 
 class PlanResponse(BaseModel):
-    """Extended plan with truck‑aware capacity info, potential risks, and best‑route flag."""
+    """Extended plan with truck-aware capacity info, fuel costs, potential risks, and best-route flag."""
     id: str
     shipment_id: str
     route_ids: list[str]
@@ -117,11 +123,29 @@ class PlanResponse(BaseModel):
     max_payload_kg: int
     gross_vehicle_weight_kg: int
     cargo_weight_kg: float
-    capacity_utilisation_pct: float   # cargo_weight / max_payload  × 100
+    capacity_utilisation_pct: float
+
+    # Fuel / operating cost breakdown
+    fuel_type: str = "diesel"
+    fuel_cost_inr: float = 0.0
+    fuel_consumption: float = 0.0
+    fuel_unit: str = "litres"
+    fuel_price_per_unit: float = 0.0
+    toll_cost_inr: float = 0.0
+    driver_cost_inr: float = 0.0
+    total_operating_cost_inr: float = 0.0
+    market_freight_cost_inr: float = 0.0
+    distance_km: float = 0.0
+
+    # EV-specific fields
+    ev_charging_stops: int = 0
+    ev_charging_stop_nodes: list[str] = Field(default_factory=list)
+    ev_charger_available: bool = True
+    ev_range_km: float = 0.0
 
     # Risk intelligence
     potential_risks: list[DisruptionInfo] = Field(default_factory=list)
-    risk_score: float = 0.0           # aggregate 0‑1 severity score for the route
+    risk_score: float = 0.0
 
     # Recommendation
     is_best: bool = False
