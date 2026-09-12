@@ -52,6 +52,17 @@ export interface DisruptionInfo {
   description: string;
 }
 
+export interface StateFuelInfo {
+  state: string;
+  label: string;
+  distance_km: number;
+  fuel_price_per_unit: number;
+  road_quality: number;
+  toll_multiplier: number;
+  fuel_cost_inr: number;
+  toll_cost_inr: number;
+}
+
 export interface Plan {
   id: string;
   shipment_id: string;
@@ -81,6 +92,8 @@ export interface Plan {
   ev_charging_stop_nodes: string[];
   ev_charger_available: boolean;
   ev_range_km: number;
+  // State-wise economics
+  state_breakdown: StateFuelInfo[];
   // Risk intelligence
   potential_risks: DisruptionInfo[];
   risk_score: number;
@@ -234,6 +247,57 @@ export async function fetchSearchTrace(
   return request("/v1/plan/trace", {
     method: "POST",
     body: JSON.stringify({ shipment_id: shipmentId, algorithm }),
+  });
+}
+
+/* ── AEGIS planning-pipeline trace (visualiser) ───────────────── */
+
+export interface AegisTraceEdge {
+  route_id: string;
+  origin: string;
+  destination: string;
+  base_cost: number;
+  risk: number;
+  weighted_cost: number;
+  time_hours: number;
+}
+
+export interface AegisTraceCandidate {
+  risk_weight: number;
+  path_nodes: string[] | null;
+  edges: AegisTraceEdge[];
+  total_cost: number;
+  expected_regret: number;
+  blocked_edges: string[];
+  non_compliant_edges: string[];
+  on_frontier: boolean;
+}
+
+export interface AegisTrace {
+  origin: string;
+  destination: string;
+  risk_grid: number[];
+  candidates: AegisTraceCandidate[];
+}
+
+export interface AegisTraceInput {
+  origin_id: string;
+  destination_id: string;
+  goods_type?: string;
+  weight_kg?: number;
+  disruptions?: Disruption[];
+}
+
+export async function fetchAegisTrace(input: AegisTraceInput): Promise<AegisTrace> {
+  return request("/v1/plan/aegis-trace", {
+    method: "POST",
+    body: JSON.stringify({
+      origin_id: input.origin_id,
+      destination_id: input.destination_id,
+      goods_type: input.goods_type ?? "general",
+      weight_kg: input.weight_kg ?? 1000,
+      disruptions: input.disruptions ?? [],
+    }),
   });
 }
 

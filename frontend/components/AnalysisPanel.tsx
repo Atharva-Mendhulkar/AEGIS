@@ -266,6 +266,62 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
             </div>
           </div>
 
+          {/* State-wise economics (fuel VAT / road quality / tolls) */}
+          {plan.state_breakdown && plan.state_breakdown.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div
+                style={{
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  color: "#64748b",
+                  marginBottom: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                <MapPin size={11} style={{ color: "#b45309" }} />
+                STATE-WISE ECONOMICS — VAT, ROAD QUALITY &amp; TOLLS VARY BY STATE
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {plan.state_breakdown.map((s) => (
+                  <div
+                    key={s.state}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.3fr 0.8fr 0.9fr 0.9fr 1fr",
+                      gap: 6,
+                      alignItems: "center",
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      background: "rgba(15,23,42,0.02)",
+                      border: "1px solid var(--border-light)",
+                      fontSize: "0.7rem",
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: "#0f172a" }}>{s.label}</span>
+                    <span style={{ color: "#64748b" }}>{s.distance_km.toFixed(0)} km</span>
+                    <span style={{ color: "#64748b", fontFamily: "var(--font-mono)" }}>
+                      ₹{s.fuel_price_per_unit.toFixed(2)}/{plan.fuel_unit === "kWh" ? "kWh" : "L"}
+                    </span>
+                    <span
+                      style={{
+                        color: s.road_quality >= 0.95 ? "#16a34a" : s.road_quality >= 0.9 ? "#b45309" : "#dc2626",
+                        fontWeight: 700,
+                      }}
+                      title="Road-quality factor — multiplies effective mileage"
+                    >
+                      road {(s.road_quality * 100).toFixed(0)}%
+                    </span>
+                    <span style={{ color: "#0f172a", fontWeight: 700, textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                      ₹{(s.fuel_cost_inr + s.toll_cost_inr).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Market freight benchmark */}
           {plan.market_freight_cost_inr > 0 && (
             <div

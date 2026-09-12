@@ -1,17 +1,14 @@
 "use client";
 import { useState, useCallback } from "react";
-import { SearchTreeGraph } from "../../components/SearchTreeGraph";
-import { AlgorithmComparison } from "../../components/AlgorithmComparison";
-import { RiskHeatmap } from "../../components/RiskHeatmap";
+import dynamic from "next/dynamic";
+import { AegisTraceGraph } from "../../components/AegisTraceGraph";
 import { DisruptionSimulator } from "../../components/DisruptionSimulator";
 import { MiniGameTree } from "../../components/MiniGameTree";
 import { LiveMetricsPanel } from "../../components/LiveMetricsPanel";
-import { INDIA_NETWORK, ALGORITHM_META } from "../../lib/constants";
+import { INDIA_NETWORK } from "../../lib/constants";
 import type { Disruption, GraphInput } from "../../lib/api";
 import {
   Brain,
-  GitBranch,
-  BarChart3,
   Flame,
   Zap,
   Swords,
@@ -19,12 +16,38 @@ import {
   MapPin,
 } from "lucide-react";
 
+// Dynamic import for MapView (Leaflet needs the window object)
+const MapView = dynamic(
+  () => import("../../components/MapView").then((m) => ({ default: m.MapView })),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        style={{
+          width: "100%",
+          height: 420,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--text-muted)",
+          fontSize: "0.85rem",
+          fontWeight: 600,
+          background: "rgba(15,23,42,0.02)",
+          borderRadius: "var(--radius)",
+        }}
+      >
+        <span className="spinner" style={{ marginRight: 10 }} />
+        Loading corridor map…
+      </div>
+    ),
+  }
+);
+
 export default function VisualizerPage() {
   const graph: GraphInput = INDIA_NETWORK;
 
   const [source, setSource] = useState<string | null>("delhi");
   const [destination, setDestination] = useState<string | null>("chennai");
-  const [algorithm, setAlgorithm] = useState("bfs");
   const [disruptions, setDisruptions] = useState<Disruption[]>([]);
 
   const handleInjectDisruption = useCallback((d: Disruption) => {
@@ -45,12 +68,12 @@ export default function VisualizerPage() {
         </div>
         <h1>How AEGIS thinks.</h1>
         <p>
-          Explore search algorithms, compare strategies, inject disruptions, and
-          watch adversarial game trees — all in real time.
+          Watch the resilience planner sweep risk weights, re-weight every corridor
+          edge, inject disruptions, and carve the Pareto frontier — all in real time.
         </p>
       </header>
 
-      {/* Source/Dest + Algorithm Selector */}
+      {/* Source/Dest Selector */}
       <div
         className="card"
         style={{ marginBottom: 20, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}
@@ -87,61 +110,34 @@ export default function VisualizerPage() {
             ))}
           </select>
         </div>
-        <div className="form-group" style={{ flex: 1, minWidth: 150, marginBottom: 0 }}>
-          <label className="form-label">
-            <GitBranch size={11} /> Search Algorithm
-          </label>
-          <select
-            className="form-select"
-            value={algorithm}
-            onChange={(e) => setAlgorithm(e.target.value)}
-          >
-            {Object.entries(ALGORITHM_META).map(([key, meta]) => (
-              <option key={key} value={key}>
-                {meta.label}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
-      {/* Row 1: Search Tree + Algorithm Comparison */}
-      <div className="grid-2" style={{ marginBottom: 20 }}>
-        <div className="card">
-          <div className="card-header">
-            <h2>
-              <GitBranch size={16} style={{ color: "#2563eb" }} />
-              Search Exploration
-            </h2>
-            <span className="badge badge-accent">{ALGORITHM_META[algorithm]?.label || algorithm}</span>
-          </div>
-          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 12 }}>
-            {ALGORITHM_META[algorithm]?.description || "Watch the algorithm explore the graph."}
-          </p>
-          <SearchTreeGraph
-            graph={graph}
-            source={source}
-            destination={destination}
-            algorithm={algorithm}
-          />
+      {/* Row 1: AEGIS Planning Pipeline (risk sweep + Pareto frontier) */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-header">
+          <h2>
+            <Brain size={16} style={{ color: "#2563eb" }} />
+            AEGIS Planning Pipeline
+          </h2>
+          <span className="badge badge-accent">Resilience Planner</span>
         </div>
-
-        <div className="card">
-          <div className="card-header">
-            <h2>
-              <BarChart3 size={16} style={{ color: "#0f172a" }} />
-              Algorithm Comparison
-            </h2>
-          </div>
-          <AlgorithmComparison
-            graph={graph}
-            source={source}
-            destination={destination}
-          />
-        </div>
+        <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 12 }}>
+          The planner runs risk-weighted uniform-cost search once per risk weight
+          (w ∈ 0, 0.5, 1, 2, 5). Each sweep re-weights every corridor edge to{" "}
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>cost × (1 + w · risk)</span>,
+          producing a candidate on the cost-vs-regret plane; the non-dominated
+          candidates form the <strong>Pareto frontier</strong> AEGIS dispatches from.
+          Inject disruptions below to watch the frontier move.
+        </p>
+        <AegisTraceGraph
+          graph={graph}
+          source={source}
+          destination={destination}
+          disruptions={disruptions}
+        />
       </div>
 
-      {/* Row 2: Risk Heatmap + Disruption Simulator */}
+      {/* Row 2: Risk Heatmap (live map overlay) + Disruption Simulator */}
       <div className="grid-2" style={{ marginBottom: 20 }}>
         <div className="card">
           <div className="card-header">
@@ -155,7 +151,19 @@ export default function VisualizerPage() {
                 : "Baseline risk"}
             </span>
           </div>
-          <RiskHeatmap graph={graph} disruptions={disruptions} />
+          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 12 }}>
+            Every corridor is coloured by its effective risk — the Bayesian union of
+            the route&apos;s base prior and any injected disruptions. Hover a corridor
+            for details; inject disruptions on the right to watch hot corridors flare.
+          </p>
+          <MapView
+            graph={graph}
+            source={source}
+            destination={destination}
+            riskHeatmap
+            disruptions={disruptions}
+            height={420}
+          />
         </div>
 
         <div className="card">

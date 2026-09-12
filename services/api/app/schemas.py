@@ -89,6 +89,16 @@ class TraceRequest(BaseModel):
     algorithm: str = "ucs"
 
 
+class AegisTraceRequest(BaseModel):
+    """Scenario for the AEGIS planning pipeline visualiser — no stored
+    shipment needed; the planner is traced directly on this corridor."""
+    origin_id: str
+    destination_id: str
+    goods_type: str = "general"
+    weight_kg: float = Field(default=1000, gt=0)
+    disruptions: list[Disruption] = Field(default_factory=list)
+
+
 class BenchmarkResult(BaseModel):
     plan_id: str
     aegis_cost: float
@@ -107,6 +117,19 @@ class DisruptionInfo(BaseModel):
     severity: float = Field(ge=0, le=1)
     severity_label: str   # "Low" | "Medium" | "High" | "Critical"
     description: str
+
+
+class StateFuelBreakdown(BaseModel):
+    """Per-state slice of a plan's cost — states differ in fuel VAT,
+    road quality (affects effective mileage) and toll rates."""
+    state: str
+    label: str
+    distance_km: float
+    fuel_price_per_unit: float
+    road_quality: float
+    toll_multiplier: float
+    fuel_cost_inr: float
+    toll_cost_inr: float
 
 
 class PlanResponse(BaseModel):
@@ -143,6 +166,9 @@ class PlanResponse(BaseModel):
     ev_charger_available: bool = True
     ev_range_km: float = 0.0
 
+    # State-wise economics (fuel VAT / road quality / tolls differ by state)
+    state_breakdown: list[StateFuelBreakdown] = Field(default_factory=list)
+
     # Risk intelligence
     potential_risks: list[DisruptionInfo] = Field(default_factory=list)
     risk_score: float = 0.0
@@ -153,6 +179,7 @@ class PlanResponse(BaseModel):
 
 
 __all__ = [
+    "AegisTraceRequest",
     "BenchmarkResult",
     "CompareRequest",
     "DisruptionInfo",
@@ -161,6 +188,7 @@ __all__ = [
     "PlanRequest",
     "PlanResponse",
     "Shipment",
+    "StateFuelBreakdown",
     "TraceRequest",
     "TRUCK_CLASSES",
 ]
