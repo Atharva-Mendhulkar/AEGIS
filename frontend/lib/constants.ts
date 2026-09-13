@@ -37,42 +37,6 @@ export function riskColor(risk: number): string {
 
 /* ── Algorithm metadata (Cobalt / Slate / Crimson Palette) ────── */
 
-export const ALGORITHM_META: Record<
-  string,
-  { label: string; color: string; description: string }
-> = {
-  bfs: {
-    label: "BFS",
-    color: "#2563eb",
-    description: "Breadth-First Search — explores level by level, guarantees shortest hop-count path",
-  },
-  dfs: {
-    label: "DFS",
-    color: "#64748b",
-    description: "Depth-First Search — explores deep before wide, memory efficient but not optimal",
-  },
-  ucs: {
-    label: "UCS",
-    color: "#0f172a",
-    description: "Uniform-Cost Search — expands cheapest-first, guarantees optimal cost path",
-  },
-  astar: {
-    label: "A*",
-    color: "#1d4ed8",
-    description: "A* Search — UCS + admissible heuristic, optimal and typically faster than UCS",
-  },
-  greedy: {
-    label: "Greedy",
-    color: "#dc2626",
-    description: "Greedy Best-First — expands closest-to-goal, fast but not optimal",
-  },
-  hill_climbing: {
-    label: "Hill Climb",
-    color: "#475569",
-    description: "Hill Climbing — local search, can get stuck at local optima",
-  },
-};
-
 /* ── India Logistics Network ──────────────────────────────────── */
 
 export const INDIA_NETWORK: GraphInput = {

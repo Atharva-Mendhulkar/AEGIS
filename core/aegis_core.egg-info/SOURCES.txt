@@ -5,7 +5,6 @@ aegis_core.egg-info/SOURCES.txt
 aegis_core.egg-info/dependency_links.txt
 aegis_core.egg-info/requires.txt
 aegis_core.egg-info/top_level.txt
-aegis_core/algorithms/adversary.py
 aegis_core/algorithms/search.py
 aegis_core/domain/models.py
 aegis_core/services/compliance.py

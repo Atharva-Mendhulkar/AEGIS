@@ -1,22 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import heapq
-import math
-import time
-from collections import deque
-from typing import Any
 
 from aegis_core import Disruption, ResiliencePlanner
-from aegis_core.algorithms.search import (
-    astar,
-    bfs,
-    dfs,
-    great_circle_heuristic,
-    greedy_best_first,
-    hill_climbing,
-    ucs,
-)
+from aegis_core.algorithms.search import haversine_km, ucs
 from aegis_core.domain.models import GraphInput, Plan, PlanStatus, Shipment
 from aegis_core.services.compliance import route_is_compliant
 from aegis_core.services.pareto import frontier
@@ -28,18 +15,14 @@ from fastapi.security import APIKeyHeader
 from prometheus_client import Counter, generate_latest
 
 from .config import settings
+from .fuel_service import compute_fuel_cost
 from .schemas import (
-    AegisTraceRequest,
     TRUCK_CLASSES,
-    BenchmarkResult,
-    CompareRequest,
+    AegisTraceRequest,
     DisruptionInfo,
     PlanRequest,
     PlanResponse,
-    StateFuelBreakdown,
-    TraceRequest,
 )
-from .fuel_service import compute_fuel_cost
 from .store import store
 
 app = FastAPI(title="AEGIS API", version="0.1.0")
@@ -161,15 +144,6 @@ def _resolve_truck(request: PlanRequest) -> tuple[int, int]:
 ROAD_CIRCUITY_FACTOR: float = 1.25
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance between two WGS-84 points, in km."""
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlmb = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
-    return 2 * 6371.0088 * math.asin(math.sqrt(a))
-
-
 def _plan_legs(route_ids: list[str]) -> list[dict]:
     """Build ordered leg records for a plan with real-world distances.
 
@@ -188,7 +162,7 @@ def _plan_legs(route_ids: list[str]) -> list[dict]:
         dest = depots.get(route.destination_id)
         distance = 0.0
         if origin is not None and dest is not None:
-            distance = _haversine_km(
+            distance = haversine_km(
                 origin.latitude, origin.longitude, dest.latitude, dest.longitude
             ) * ROAD_CIRCUITY_FACTOR
         legs.append({
@@ -291,9 +265,7 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
             ev_charging_stop_nodes=fuel.ev_charging_stop_nodes,
             ev_charger_available=fuel.ev_charger_available,
             ev_range_km=fuel.ev_range_km,
-            state_breakdown=[
-                StateFuelBreakdown(**s.as_dict()) for s in fuel.state_breakdown
-            ],
+            state_breakdown=fuel.state_breakdown,
             potential_risks=risks,
             risk_score=risk_score,
         ))
@@ -460,18 +432,6 @@ def aegis_trace(request: AegisTraceRequest) -> dict:
     }
 
 
-@app.get("/v1/benchmark/ortools", response_model=BenchmarkResult, dependencies=[Depends(auth)])
-def benchmark(plan_id: str) -> BenchmarkResult:
-    plan = store.plans.get(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    return BenchmarkResult(
-        plan_id=plan_id,
-        aegis_cost=plan.total_cost,
-        aegis_regret=plan.expected_regret,
-    )
-
-
 @app.get("/v1/pareto", dependencies=[Depends(auth)])
 def pareto():
     return frontier(list(store.plans.values()))
@@ -484,211 +444,6 @@ def truck_classes():
         {"key": k, **v}
         for k, v in TRUCK_CLASSES.items()
     ]
-
-
-@app.post("/v1/plan/compare", dependencies=[Depends(auth)])
-def compare_algorithms(request: CompareRequest):
-    shipment = store.shipments.get(request.shipment_id)
-    if shipment is None:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-    p = planner()
-    disruptions = store.disruptions
-    start = shipment.origin_id
-    goal = shipment.destination_id
-
-    def base_neighbors(node: str) -> list[tuple[str, float]]:
-        return [
-            (route.destination_id, route.cost)
-            for route in p.adjacency.get(node, [])
-            if route_is_compliant(route, shipment)
-            and not any(d.edge_id == route.id and d.severity >= 1 for d in disruptions)
-        ]
-
-    coordinates = {d.id: (d.latitude, d.longitude) for d in store.graph.depots}
-    try:
-        h = great_circle_heuristic(coordinates, goal)
-    except Exception:
-        def h(_: Any) -> float:
-            return 0.0
-
-    def calc_cost(path: list[str] | None) -> float | None:
-        if not path or len(path) < 2:
-            return 0.0 if path else None
-        total = 0.0
-        for u, v in zip(path[:-1], path[1:], strict=True):
-            edges = [r for r in p.adjacency.get(u, []) if r.destination_id == v]
-            if edges:
-                total += min(r.cost for r in edges)
-        return total
-
-    def bfs_algo(neighbors):
-        return bfs(start, goal, neighbors)
-
-    def dfs_algo(neighbors):
-        return dfs(start, goal, neighbors)
-
-    def ucs_algo(neighbors):
-        res = ucs(start, goal, neighbors)
-        return res[0] if res else None
-
-    def astar_algo(neighbors):
-        res = astar(start, goal, neighbors, h)
-        return res[0] if res else None
-
-    def greedy_algo(neighbors):
-        return greedy_best_first(start, goal, neighbors, h)
-
-    def hill_climbing_algo(neighbors):
-        return hill_climbing(start, goal, neighbors, h, maximizing=False)
-
-    algos = [
-        ("bfs", bfs_algo),
-        ("dfs", dfs_algo),
-        ("ucs", ucs_algo),
-        ("astar", astar_algo),
-        ("greedy", greedy_algo),
-        ("hill_climbing", hill_climbing_algo),
-    ]
-
-    results = []
-    for name, run_fn in algos:
-        explored: set[str] = set()
-
-        def n_wrap(node: str, _n=base_neighbors, _exp=explored) -> list[tuple[str, float]]:
-            _exp.add(node)
-            return _n(node)
-
-        t0 = time.perf_counter()
-        try:
-            path = run_fn(n_wrap)
-        except Exception:
-            path = None
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-
-        cost = calc_cost(path)
-        results.append({
-            "algorithm": name,
-            "path": path,
-            "cost": cost,
-            "nodes_explored": len(explored),
-            "time_ms": round(elapsed_ms, 3),
-            "path_length": len(path) if path else 0,
-        })
-
-    return results
-
-
-@app.post("/v1/plan/trace", dependencies=[Depends(auth)])
-def plan_trace(request: TraceRequest):
-    shipment = store.shipments.get(request.shipment_id)
-    if shipment is None:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-    p = planner()
-    disruptions = store.disruptions
-    start = shipment.origin_id
-    goal = shipment.destination_id
-    algo = request.algorithm.lower()
-
-    def base_neighbors(node: str) -> list[tuple[str, float]]:
-        return [
-            (route.destination_id, route.cost)
-            for route in p.adjacency.get(node, [])
-            if route_is_compliant(route, shipment)
-            and not any(d.edge_id == route.id and d.severity >= 1 for d in disruptions)
-        ]
-
-    coordinates = {d.id: (d.latitude, d.longitude) for d in store.graph.depots}
-    try:
-        h = great_circle_heuristic(coordinates, goal)
-    except Exception:
-        def h(_: Any) -> float:
-            return 0.0
-
-    steps = []
-    step_idx = 0
-    final_path = None
-    final_cost = None
-
-    if algo == "dfs":
-        stack = [(start, None, 0.0, [start])]
-        seen = {start}
-        while stack:
-            node, parent, cost, path = stack.pop()
-            is_goal = (node == goal)
-            steps.append({
-                "step": step_idx,
-                "node": node,
-                "parent": parent,
-                "cost_so_far": cost,
-                "frontier_size": len(stack),
-                "is_goal": is_goal,
-            })
-            step_idx += 1
-            if is_goal:
-                final_path = path
-                final_cost = cost
-                break
-            for child, edge_cost in reversed(base_neighbors(node)):
-                if child not in seen:
-                    seen.add(child)
-                    stack.append((child, node, cost + edge_cost, path + [child]))
-    elif algo in ("ucs", "astar"):
-        pq_frontier = [(h(start) if algo == "astar" else 0.0, 0.0, start, None, [start])]
-        best = {start: 0.0}
-        while pq_frontier:
-            _, cost, node, parent, path = heapq.heappop(pq_frontier)
-            is_goal = (node == goal)
-            steps.append({
-                "step": step_idx,
-                "node": node,
-                "parent": parent,
-                "cost_so_far": cost,
-                "frontier_size": len(pq_frontier),
-                "is_goal": is_goal,
-            })
-            step_idx += 1
-            if is_goal:
-                final_path = path
-                final_cost = cost
-                break
-            if cost > best.get(node, float("inf")):
-                continue
-            for child, edge_cost in base_neighbors(node):
-                cand = cost + edge_cost
-                if cand < best.get(child, float("inf")):
-                    best[child] = cand
-                    prio = cand + (h(child) if algo == "astar" else 0.0)
-                    heapq.heappush(pq_frontier, (prio, cand, child, node, path + [child]))
-    else:  # default bfs
-        queue = deque([(start, None, 0.0, [start])])
-        seen = {start}
-        while queue:
-            node, parent, cost, path = queue.popleft()
-            is_goal = (node == goal)
-            steps.append({
-                "step": step_idx,
-                "node": node,
-                "parent": parent,
-                "cost_so_far": cost,
-                "frontier_size": len(queue),
-                "is_goal": is_goal,
-            })
-            step_idx += 1
-            if is_goal:
-                final_path = path
-                final_cost = cost
-                break
-            for child, edge_cost in base_neighbors(node):
-                if child not in seen:
-                    seen.add(child)
-                    queue.append((child, node, cost + edge_cost, path + [child]))
-
-    return {
-        "algorithm": algo,
-        "steps": steps,
-        "final_path": final_path,
-        "final_cost": final_cost,
-    }
 
 
 @app.websocket("/v1/stream/simulation")

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { SimulationEvent } from "../types";
+import { SimulationEvent } from "../lib/api";
 
 const WS_URL =
   process.env.NEXT_PUBLIC_WS_URL ??

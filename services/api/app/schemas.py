@@ -3,6 +3,8 @@ from __future__ import annotations
 from aegis_core.domain.models import Disruption, GraphInput, Shipment
 from pydantic import BaseModel, Field
 
+from .fuel_service import StateBreakdown as StateFuelBreakdown
+
 # ---------------------------------------------------------------------------
 # Indian-standard truck classes (MoRTH / CMVR 1989 categories)
 # ---------------------------------------------------------------------------
@@ -80,15 +82,6 @@ class PlanRequest(BaseModel):
     )
 
 
-class CompareRequest(BaseModel):
-    shipment_id: str
-
-
-class TraceRequest(BaseModel):
-    shipment_id: str
-    algorithm: str = "ucs"
-
-
 class AegisTraceRequest(BaseModel):
     """Scenario for the AEGIS planning pipeline visualiser — no stored
     shipment needed; the planner is traced directly on this corridor."""
@@ -97,16 +90,6 @@ class AegisTraceRequest(BaseModel):
     goods_type: str = "general"
     weight_kg: float = Field(default=1000, gt=0)
     disruptions: list[Disruption] = Field(default_factory=list)
-
-
-class BenchmarkResult(BaseModel):
-    plan_id: str
-    aegis_cost: float
-    aegis_regret: float
-    ortools_cost: float | None = None
-    ortools_regret: float | None = None
-    cost_delta_pct: float | None = None
-    regret_delta_pct: float | None = None
 
 
 class DisruptionInfo(BaseModel):
@@ -119,21 +102,8 @@ class DisruptionInfo(BaseModel):
     description: str
 
 
-class StateFuelBreakdown(BaseModel):
-    """Per-state slice of a plan's cost — states differ in fuel VAT,
-    road quality (affects effective mileage) and toll rates."""
-    state: str
-    label: str
-    distance_km: float
-    fuel_price_per_unit: float
-    road_quality: float
-    toll_multiplier: float
-    fuel_cost_inr: float
-    toll_cost_inr: float
-
-
 class PlanResponse(BaseModel):
-    """Extended plan with truck-aware capacity info, fuel costs, potential risks, and best-route flag."""
+    """Extended plan with truck-aware capacity info, fuel costs, risks, best-route flag."""
     id: str
     shipment_id: str
     route_ids: list[str]
@@ -180,8 +150,6 @@ class PlanResponse(BaseModel):
 
 __all__ = [
     "AegisTraceRequest",
-    "BenchmarkResult",
-    "CompareRequest",
     "DisruptionInfo",
     "Disruption",
     "GraphInput",
@@ -189,6 +157,5 @@ __all__ = [
     "PlanResponse",
     "Shipment",
     "StateFuelBreakdown",
-    "TraceRequest",
     "TRUCK_CLASSES",
 ]

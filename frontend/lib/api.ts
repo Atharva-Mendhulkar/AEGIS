@@ -127,31 +127,6 @@ export interface SimulationEvent {
   payload: Record<string, unknown>;
 }
 
-export interface AlgorithmResult {
-  algorithm: string;
-  path: string[] | null;
-  cost: number | null;
-  nodes_explored: number;
-  time_ms: number;
-  path_length: number;
-}
-
-export interface SearchTraceStep {
-  step: number;
-  node: string;
-  parent: string | null;
-  cost_so_far: number;
-  frontier_size: number;
-  is_goal: boolean;
-}
-
-export interface SearchTrace {
-  algorithm: string;
-  steps: SearchTraceStep[];
-  final_path: string[] | null;
-  final_cost: number | null;
-}
-
 /* ── API calls ────────────────────────────────────────────────── */
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -221,35 +196,6 @@ export async function replan(planId: string): Promise<Plan> {
   return request(`/v1/plan/${planId}/replan`, { method: "POST" });
 }
 
-export async function fetchPareto(): Promise<Plan[]> {
-  return request("/v1/pareto");
-}
-
-export async function fetchBenchmark(
-  planId: string
-): Promise<{ plan_id: string; aegis_cost: number; aegis_regret: number }> {
-  return request(`/v1/benchmark/ortools?plan_id=${planId}`);
-}
-
-export async function compareAlgorithms(
-  shipmentId: string
-): Promise<AlgorithmResult[]> {
-  return request("/v1/plan/compare", {
-    method: "POST",
-    body: JSON.stringify({ shipment_id: shipmentId }),
-  });
-}
-
-export async function fetchSearchTrace(
-  shipmentId: string,
-  algorithm: string = "ucs"
-): Promise<SearchTrace> {
-  return request("/v1/plan/trace", {
-    method: "POST",
-    body: JSON.stringify({ shipment_id: shipmentId, algorithm }),
-  });
-}
-
 /* ── AEGIS planning-pipeline trace (visualiser) ───────────────── */
 
 export interface AegisTraceEdge {
@@ -301,13 +247,3 @@ export async function fetchAegisTrace(input: AegisTraceInput): Promise<AegisTrac
   });
 }
 
-export function createSimulationWS(): WebSocket {
-  const wsUrl = (
-    process.env.NEXT_PUBLIC_WS_URL ??
-    (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
-      /^http/,
-      "ws"
-    )
-  );
-  return new WebSocket(`${wsUrl}/v1/stream/simulation`);
-}

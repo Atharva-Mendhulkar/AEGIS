@@ -4,4 +4,3 @@ Version: 0.1.0
 Summary: Framework-agnostic resilience-aware logistics planning algorithms
 Requires-Python: >=3.11
 Requires-Dist: pydantic>=2.7
-Requires-Dist: networkx>=3.3

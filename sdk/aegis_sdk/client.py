@@ -31,47 +31,30 @@ class AEGISClient:
     def plan(
         self,
         shipment_id: str,
-        objective: str = "min_cost_bounded_regret",
-        risk_weight: float = 1.0,
+        truck_class: str = "hcv",
+        fuel_type: str = "diesel",
     ) -> dict[str, Any]:
-        payload = {
-            "shipment_id": shipment_id,
-            "objective": objective,
-            "risk_weight": risk_weight,
-        }
         return self.client.post(
-            "/plan", json=payload
+            "/plan", json={
+                "shipment_id": shipment_id,
+                "truck_class": truck_class,
+                "fuel_type": fuel_type,
+            }
         ).raise_for_status().json()
 
     def disrupt(
         self, type: str, edge_id: str, severity: float, source: str = "manual"
     ) -> dict[str, Any]:
-        payload = {
-            "type": type,
-            "edge_id": edge_id,
-            "severity": severity,
-            "source": source,
-        }
         return self.client.post(
-            "/disrupt", json=payload
+            "/disrupt", json={
+                "type": type,
+                "edge_id": edge_id,
+                "severity": severity,
+                "source": source,
+            }
         ).raise_for_status().json()
 
     def replan(self, plan_id: str) -> dict[str, Any]:
         return self.client.post(
             f"/plan/{plan_id}/replan"
         ).raise_for_status().json()
-
-    def benchmark_against_ortools(
-        self, plan_id: str
-    ) -> dict[str, Any]:
-        return self.client.get(
-            "/benchmark/ortools", params={"plan_id": plan_id}
-        ).raise_for_status().json()
-
-    def pareto(self) -> list[dict[str, Any]]:
-        return self.client.get("/pareto").raise_for_status().json()
-
-    def stream_simulation(self, run_id: str) -> None:
-        raise NotImplementedError(
-            "WebSocket streaming is not yet implemented"
-        )

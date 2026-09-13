@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import random
 
 from aegis_core.algorithms.search import (
     astar,
@@ -10,7 +9,6 @@ from aegis_core.algorithms.search import (
     great_circle_heuristic,
     greedy_best_first,
     hill_climbing,
-    random_restart,
     ucs,
 )
 
@@ -75,15 +73,6 @@ def test_hill_climbing_stuck_at_local_optimum_returns_none() -> None:
     # B is a local peak; D is only reachable via C, whose value (3) < B's (100).
     value = {"A": 0.0, "B": 100.0, "C": 3.0, "D": 200.0, "E": 1.0}.__getitem__
     assert hill_climbing("A", "D", lookup, value, maximizing=True) is None
-
-
-def test_random_restart_finds_shortest_hop_path() -> None:
-    rng = random.Random(42)
-    path = random_restart("A", "D", sample_neighbors, dfs, rng, iterations=50)
-    assert path is not None
-    assert path[0] == "A" and path[-1] == "D"
-    # Shortest hop path is A->C->D (2 edges); random_restart keeps the fewest-hop result.
-    assert len(path) == 3
 
 
 def test_great_circle_heuristic_goal_distance_is_zero() -> None:

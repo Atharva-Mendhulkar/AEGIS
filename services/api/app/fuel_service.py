@@ -41,8 +41,9 @@ Real freight market rates (spot market, ₹ per tonne-km, LEADS/CRISIL 2024):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
 from typing import Any
+
+from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # Current fuel prices (₹ / unit) — update monthly from IOCL/BPCL website
@@ -173,8 +174,7 @@ def _state_for_depot(depot_id: str) -> dict[str, Any] | None:
 # Data classes for the computed cost breakdown
 # ---------------------------------------------------------------------------
 
-@dataclass
-class StateBreakdown:
+class StateBreakdown(BaseModel):
     """Per-state slice of the route cost (distance split across states)."""
     state: str
     label: str
@@ -185,21 +185,8 @@ class StateBreakdown:
     fuel_cost_inr: float = 0.0
     toll_cost_inr: float = 0.0
 
-    def as_dict(self) -> dict:
-        return {
-            "state": self.state,
-            "label": self.label,
-            "distance_km": round(self.distance_km, 1),
-            "fuel_price_per_unit": round(self.fuel_price_per_unit, 2),
-            "road_quality": round(self.road_quality, 2),
-            "toll_multiplier": round(self.toll_multiplier, 2),
-            "fuel_cost_inr": round(self.fuel_cost_inr, 2),
-            "toll_cost_inr": round(self.toll_cost_inr, 2),
-        }
 
-
-@dataclass
-class FuelCostBreakdown:
+class FuelCostBreakdown(BaseModel):
     truck_class: str
     fuel_type: str                          # "diesel" | "petrol" | "electric"
     distance_km: float
@@ -219,7 +206,7 @@ class FuelCostBreakdown:
 
     # EV charging stops (only for electric)
     ev_charging_stops: int = 0
-    ev_charging_stop_nodes: list[str] = field(default_factory=list)
+    ev_charging_stop_nodes: list[str] = []
     ev_charging_cost_per_stop: float = 0.0  # ₹ per stop (fast-charger session)
     ev_total_charging_cost_inr: float = 0.0
     ev_range_km: float = 0.0                # per charge
@@ -229,28 +216,7 @@ class FuelCostBreakdown:
     total_operating_cost_inr: float = 0.0
 
     # Per-state economics along the route
-    state_breakdown: list[StateBreakdown] = field(default_factory=list)
-
-    def as_dict(self) -> dict:
-        return {
-            "truck_class": self.truck_class,
-            "fuel_type": self.fuel_type,
-            "distance_km": round(self.distance_km, 1),
-            "fuel_consumption": round(self.fuel_consumption, 2),
-            "fuel_unit": self.fuel_unit,
-            "fuel_price_per_unit": self.fuel_price_per_unit,
-            "fuel_cost_inr": round(self.fuel_cost_inr, 2),
-            "toll_cost_inr": round(self.toll_cost_inr, 2),
-            "driver_cost_inr": round(self.driver_cost_inr, 2),
-            "market_freight_cost_inr": round(self.market_freight_cost_inr, 2),
-            "ev_charging_stops": self.ev_charging_stops,
-            "ev_charging_stop_nodes": self.ev_charging_stop_nodes,
-            "ev_total_charging_cost_inr": round(self.ev_total_charging_cost_inr, 2),
-            "ev_range_km": self.ev_range_km,
-            "ev_charger_available": self.ev_charger_available,
-            "total_operating_cost_inr": round(self.total_operating_cost_inr, 2),
-            "state_breakdown": [s.as_dict() for s in self.state_breakdown],
-        }
+    state_breakdown: list[StateBreakdown] = []
 
 
 # ---------------------------------------------------------------------------

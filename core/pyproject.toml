@@ -7,7 +7,7 @@ name = "aegis-core"
 version = "0.1.0"
 description = "Framework-agnostic resilience-aware logistics planning algorithms"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.7", "networkx>=3.3"]
+dependencies = ["pydantic>=2.7"]
 
 [tool.setuptools.packages.find]
 include = ["aegis_core*"]

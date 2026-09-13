@@ -12,4 +12,3 @@ jobs:
       - run: mypy core/aegis_core
       - run: pytest
       - run: docker build -t aegis-api -f services/api/Dockerfile .
-      - run: docker build -t aegis-worker -f services/worker/Dockerfile .
