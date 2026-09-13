@@ -48,9 +48,9 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 # Current fuel prices (₹ / unit) — update monthly from IOCL/BPCL website
 # ---------------------------------------------------------------------------
-DIESEL_PRICE_PER_LITRE: float = 91.50   # IOCL Delhi pump price, Sep 2024
-PETROL_PRICE_PER_LITRE: float = 96.72   # IOCL Delhi pump price, Sep 2024
-EV_CHARGE_RATE_PER_KWH: float = 9.00    # EESL / Tata Power DC fast-charger
+DIESEL_PRICE_PER_LITRE: float = 91.50  # IOCL Delhi pump price, Sep 2024
+PETROL_PRICE_PER_LITRE: float = 96.72  # IOCL Delhi pump price, Sep 2024
+EV_CHARGE_RATE_PER_KWH: float = 9.00  # EESL / Tata Power DC fast-charger
 
 # ---------------------------------------------------------------------------
 # Per-class data
@@ -59,7 +59,7 @@ _CLASS_DATA: dict[str, dict[str, Any]] = {
     "lcv": {
         "mileage_kmpl": 13.0,
         "ev_range_km": 140.0,
-        "ev_kwh_per_100km": 28.0,   # Euler HiLoad / Tata Ace EV
+        "ev_kwh_per_100km": 28.0,  # Euler HiLoad / Tata Ace EV
         "toll_per_km": 1.00,
         "driver_cost_per_hr": 33.33,
         "freight_rate_per_tonne_km": 4.20,
@@ -67,7 +67,7 @@ _CLASS_DATA: dict[str, dict[str, Any]] = {
     "icv": {
         "mileage_kmpl": 9.0,
         "ev_range_km": 200.0,
-        "ev_kwh_per_100km": 55.0,   # Tata Ultra T7 EV
+        "ev_kwh_per_100km": 55.0,  # Tata Ultra T7 EV
         "toll_per_km": 1.30,
         "driver_cost_per_hr": 33.33,
         "freight_rate_per_tonne_km": 3.50,
@@ -110,16 +110,16 @@ _CLASS_DATA: dict[str, dict[str, Any]] = {
 # (subset of EVYATRA / Tata Power / EESL station data, as of Sep 2024)
 # Each station is tagged to the nearest depot node in AEGIS's graph.
 EV_CHARGING_NODES: set[str] = {
-    "delhi",       # Multiple stations: DMRC depots + Tata Power
-    "mumbai",      # BEST + Tata Power + EESL
-    "bangalore",   # BESCOM + Tata Power
-    "hyderabad",   # TSREDCO highway stations
-    "pune",        # Mahadiscom + Tata Power
-    "ahmedabad",   # PGVCL stations
-    "jaipur",      # Rajasthan EV mission hubs
-    "chennai",     # TANGEDCO hubs
-    "kolkata",     # WBSEDCL stations
-    "lucknow",     # UPCL pilot stations
+    "delhi",  # Multiple stations: DMRC depots + Tata Power
+    "mumbai",  # BEST + Tata Power + EESL
+    "bangalore",  # BESCOM + Tata Power
+    "hyderabad",  # TSREDCO highway stations
+    "pune",  # Mahadiscom + Tata Power
+    "ahmedabad",  # PGVCL stations
+    "jaipur",  # Rajasthan EV mission hubs
+    "chennai",  # TANGEDCO hubs
+    "kolkata",  # WBSEDCL stations
+    "lucknow",  # UPCL pilot stations
 }
 
 # ---------------------------------------------------------------------------
@@ -146,22 +146,88 @@ DEPOT_STATE: dict[str, str] = {
 #: road_quality = multiplier on mileage (1.00 = ideal expressway tarmac);
 #: toll_mult = multiplier on the national average per-km truck toll.
 STATE_DATA: dict[str, dict[str, Any]] = {
-    "delhi":        {"label": "Delhi (NCT)",     "diesel": 87.62, "petrol":  94.77, "ev":  8.50, "road_quality": 1.00, "toll_mult": 1.00},
-    "rajasthan":    {"label": "Rajasthan",       "diesel": 91.16, "petrol":  98.24, "ev":  9.20, "road_quality": 0.92, "toll_mult": 1.05},
-    "uttar_pradesh":{"label": "Uttar Pradesh",   "diesel": 87.86, "petrol":  94.56, "ev":  9.50, "road_quality": 0.88, "toll_mult": 1.10},
-    "gujarat":      {"label": "Gujarat",         "diesel": 90.17, "petrol":  95.48, "ev":  8.90, "road_quality": 0.96, "toll_mult": 0.95},
-    "maharashtra":  {"label": "Maharashtra",     "diesel": 92.30, "petrol":  97.80, "ev": 10.20, "road_quality": 0.94, "toll_mult": 1.15},
-    "karnataka":    {"label": "Karnataka",       "diesel": 90.94, "petrol":  97.52, "ev":  9.00, "road_quality": 0.95, "toll_mult": 1.00},
-    "telangana":    {"label": "Telangana",       "diesel": 96.90, "petrol": 107.20, "ev": 10.50, "road_quality": 0.93, "toll_mult": 1.10},
-    "tamil_nadu":   {"label": "Tamil Nadu",      "diesel": 92.81, "petrol": 100.76, "ev":  9.80, "road_quality": 0.96, "toll_mult": 1.05},
-    "west_bengal":  {"label": "West Bengal",     "diesel": 95.24, "petrol": 104.90, "ev": 10.00, "road_quality": 0.90, "toll_mult": 1.00},
+    "delhi": {
+        "label": "Delhi (NCT)",
+        "diesel": 87.62,
+        "petrol": 94.77,
+        "ev": 8.50,
+        "road_quality": 1.00,
+        "toll_mult": 1.00,
+    },
+    "rajasthan": {
+        "label": "Rajasthan",
+        "diesel": 91.16,
+        "petrol": 98.24,
+        "ev": 9.20,
+        "road_quality": 0.92,
+        "toll_mult": 1.05,
+    },
+    "uttar_pradesh": {
+        "label": "Uttar Pradesh",
+        "diesel": 87.86,
+        "petrol": 94.56,
+        "ev": 9.50,
+        "road_quality": 0.88,
+        "toll_mult": 1.10,
+    },
+    "gujarat": {
+        "label": "Gujarat",
+        "diesel": 90.17,
+        "petrol": 95.48,
+        "ev": 8.90,
+        "road_quality": 0.96,
+        "toll_mult": 0.95,
+    },
+    "maharashtra": {
+        "label": "Maharashtra",
+        "diesel": 92.30,
+        "petrol": 97.80,
+        "ev": 10.20,
+        "road_quality": 0.94,
+        "toll_mult": 1.15,
+    },
+    "karnataka": {
+        "label": "Karnataka",
+        "diesel": 90.94,
+        "petrol": 97.52,
+        "ev": 9.00,
+        "road_quality": 0.95,
+        "toll_mult": 1.00,
+    },
+    "telangana": {
+        "label": "Telangana",
+        "diesel": 96.90,
+        "petrol": 107.20,
+        "ev": 10.50,
+        "road_quality": 0.93,
+        "toll_mult": 1.10,
+    },
+    "tamil_nadu": {
+        "label": "Tamil Nadu",
+        "diesel": 92.81,
+        "petrol": 100.76,
+        "ev": 9.80,
+        "road_quality": 0.96,
+        "toll_mult": 1.05,
+    },
+    "west_bengal": {
+        "label": "West Bengal",
+        "diesel": 95.24,
+        "petrol": 104.90,
+        "ev": 10.00,
+        "road_quality": 0.90,
+        "toll_mult": 1.00,
+    },
 }
 
 #: Fallback for custom/feeder nodes outside the known depot set (national avg).
 DEFAULT_STATE: dict[str, Any] = {
     "label": "En-route (national avg)",
-    "diesel": 91.50, "petrol": 96.72, "ev": 9.00,
-    "road_quality": 0.93, "toll_mult": 1.00,
+    "diesel": 91.50,
+    "petrol": 96.72,
+    "ev": 9.00,
+    "road_quality": 0.93,
+    "toll_mult": 1.00,
 }
 
 
@@ -174,8 +240,10 @@ def _state_for_depot(depot_id: str) -> dict[str, Any] | None:
 # Data classes for the computed cost breakdown
 # ---------------------------------------------------------------------------
 
+
 class StateBreakdown(BaseModel):
     """Per-state slice of the route cost (distance split across states)."""
+
     state: str
     label: str
     distance_km: float = 0.0
@@ -188,11 +256,11 @@ class StateBreakdown(BaseModel):
 
 class FuelCostBreakdown(BaseModel):
     truck_class: str
-    fuel_type: str                          # "diesel" | "petrol" | "electric"
+    fuel_type: str  # "diesel" | "petrol" | "electric"
     distance_km: float
 
     # Fuel / energy
-    fuel_consumption: float = 0.0           # litres (diesel/petrol) or kWh (EV)
+    fuel_consumption: float = 0.0  # litres (diesel/petrol) or kWh (EV)
     fuel_unit: str = "litres"
     fuel_price_per_unit: float = 0.0
     fuel_cost_inr: float = 0.0
@@ -202,15 +270,15 @@ class FuelCostBreakdown(BaseModel):
     driver_cost_inr: float = 0.0
 
     # Market freight rate (benchmark)
-    market_freight_cost_inr: float = 0.0    # ₹ per tonne-km × weight × distance
+    market_freight_cost_inr: float = 0.0  # ₹ per tonne-km × weight × distance
 
     # EV charging stops (only for electric)
     ev_charging_stops: int = 0
     ev_charging_stop_nodes: list[str] = []
     ev_charging_cost_per_stop: float = 0.0  # ₹ per stop (fast-charger session)
     ev_total_charging_cost_inr: float = 0.0
-    ev_range_km: float = 0.0                # per charge
-    ev_charger_available: bool = True       # False if route has insufficient charging infra
+    ev_range_km: float = 0.0  # per charge
+    ev_charger_available: bool = True  # False if route has insufficient charging infra
 
     # Grand total (fuel + toll + driver + EV charging)
     total_operating_cost_inr: float = 0.0
@@ -222,6 +290,7 @@ class FuelCostBreakdown(BaseModel):
 # ---------------------------------------------------------------------------
 # Core computation
 # ---------------------------------------------------------------------------
+
 
 def _state_key_of(depot_id: str) -> str:
     return DEPOT_STATE.get(depot_id, "__feeder__")
@@ -366,9 +435,9 @@ def compute_fuel_cost(
         # DC fast-charge session priced at the state tariffs of the stop nodes
         kwh_per_stop = min(cls["ev_kwh_per_100km"] * ev_range / 100.0, 150.0)
         if charging_nodes:
-            avg_stop_rate = sum(
-                _state_for_depot(n)["ev"] for n in charging_nodes
-            ) / len(charging_nodes)
+            avg_stop_rate = sum(_state_for_depot(n)["ev"] for n in charging_nodes) / len(
+                charging_nodes
+            )
         else:
             avg_stop_rate = DEFAULT_STATE["ev"]
         charging_cost_per_stop = kwh_per_stop * avg_stop_rate
@@ -381,9 +450,7 @@ def compute_fuel_cost(
     bd.driver_cost_inr = effective_hours * cls["driver_cost_per_hr"]
 
     # ── Market freight benchmark ─────────────────────────────────────────
-    bd.market_freight_cost_inr = (
-        cls["freight_rate_per_tonne_km"] * cargo_tonnes * distance_km
-    )
+    bd.market_freight_cost_inr = cls["freight_rate_per_tonne_km"] * cargo_tonnes * distance_km
 
     # ── Grand total ───────────────────────────────────────────────────────
     base = bd.fuel_cost_inr + bd.toll_cost_inr + bd.driver_cost_inr
