@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import {
   DollarSign,
   AlertTriangle,
@@ -79,7 +79,7 @@ function EvChargingPlan({ plan, graph }: { plan: Plan; graph: GraphInput }) {
                   gap: 3,
                 }}
               >
-                <MapPin size={9} />⚡ {depot?.name || nodeId}
+                <MapPin size={9} /> {depot?.name || nodeId}
               </span>
             );
           })}
@@ -110,9 +110,18 @@ interface Props {
   graph: GraphInput;
   selectedPlanIndex: number;
   onSelectPlan: (index: number) => void;
+  hoveredRouteId?: string | null;
+  onHoverRoute?: (routeId: string | null) => void;
 }
 
-export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }: Props) {
+export function AnalysisPanel({
+  plans,
+  graph,
+  selectedPlanIndex,
+  onSelectPlan,
+  hoveredRouteId = null,
+  onHoverRoute,
+}: Props) {
   const [activeGraphTab, setActiveGraphTab] = useState<"radar" | "hops" | "profile">("radar");
 
   if (plans.length === 0) {
@@ -144,6 +153,52 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
           return sum + (r ? r.risk_prior : 0);
         }, 0) / plan.route_ids.length
       : 0;
+
+  // Cumulative hours at each stop
+  const cumTimes: number[] = [];
+  let runningHours = 0;
+  for (const rid of plan.route_ids) {
+    const r = routeMap[rid];
+    runningHours += r ? r.time_hours : 0;
+    cumTimes.push(runningHours);
+  }
+
+  // First origin name
+  const firstRoute = plan.route_ids.length > 0 ? routeMap[plan.route_ids[0]] : null;
+  const firstOriginName = firstRoute
+    ? graph.depots.find((d) => d.id === firstRoute.origin_id)?.name || firstRoute.origin_id
+    : "Origin";
+
+  // Highest risk bottleneck leg
+  let bottleneckRoute: typeof graph.routes[0] | null = null;
+  for (const rid of plan.route_ids) {
+    const r = routeMap[rid];
+    if (r && (!bottleneckRoute || r.risk_prior > bottleneckRoute.risk_prior)) {
+      bottleneckRoute = r;
+    }
+  }
+  const bottleneckOrigin = bottleneckRoute
+    ? graph.depots.find((d) => d.id === bottleneckRoute.origin_id)?.name || bottleneckRoute.origin_id
+    : "";
+  const bottleneckDest = bottleneckRoute
+    ? graph.depots.find((d) => d.id === bottleneckRoute.destination_id)?.name || bottleneckRoute.destination_id
+    : "";
+
+  // Risk health spectrum breakdown
+  let lowRiskCount = 0;
+  let medRiskCount = 0;
+  let highRiskCount = 0;
+  for (const rid of plan.route_ids) {
+    const r = routeMap[rid];
+    if (!r) continue;
+    if (r.risk_prior < 0.1) lowRiskCount++;
+    else if (r.risk_prior <= 0.2) medRiskCount++;
+    else highRiskCount++;
+  }
+  const totalHops = Math.max(plan.route_ids.length, 1);
+  const lowPct = Math.round((lowRiskCount / totalHops) * 100);
+  const medPct = Math.round((medRiskCount / totalHops) * 100);
+  const highPct = 100 - lowPct - medPct;
 
   return (
     <div className="stack">
@@ -562,13 +617,18 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
         )}
       </div>
 
-      {/* Turn-by-Turn Route Breakdown */}
+      {/* Turn-by-Turn Route Breakdown & Interactive Visual Journey */}
       <div className="card">
-        <div className="card-header">
-          <h2>
-            <Route size={15} style={{ color: "#2563eb" }} />
-            Corridor Route Details
-          </h2>
+        <div className="card-header" style={{ marginBottom: 8 }}>
+          <div>
+            <h2 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.88rem" }}>
+              <Route size={15} style={{ color: "#2563eb" }} />
+              Route Taken Journey Visualizer
+            </h2>
+            <div style={{ fontSize: "0.68rem", color: "#64748b", marginTop: 2 }}>
+              {plan.route_ids.length} corridor hops · {plan.distance_km ? `${plan.distance_km.toFixed(0)} km` : `${totalTime}h`} total
+            </div>
+          </div>
           <span style={{ fontSize: "0.725rem" }}>
             {plan.status === "finalized" ? (
               <span style={{ color: "#2563eb", display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
@@ -582,6 +642,104 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
           </span>
         </div>
 
+        {/* 1. Visual Route Journey Stepper (Milestone Timeline) */}
+        <div style={{ margin: "4px 0 10px", padding: "10px", background: "rgba(15,23,42,0.02)", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+            Interactive Waypoint Flow (Hover leg to spotlight on map)
+          </div>
+
+          <div className="journey-stepper">
+            {/* Origin Stop */}
+            <div
+              className="journey-stop-node"
+              onMouseEnter={() => plan.route_ids[0] && onHoverRoute?.(plan.route_ids[0])}
+              onMouseLeave={() => onHoverRoute?.(null)}
+            >
+              <div className="journey-stop-pill start">1</div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#0f172a" }}>{firstOriginName}</div>
+              <div style={{ fontSize: "0.62rem", color: "#64748b" }}>0h · Start</div>
+            </div>
+
+            {/* Legs & Subsequent Stops */}
+            {plan.route_ids.map((rid, idx) => {
+              const route = routeMap[rid];
+              if (!route) return null;
+              const dest = graph.depots.find((d) => d.id === route.destination_id);
+              const isDest = idx === plan.route_ids.length - 1;
+              const isHovered = hoveredRouteId === rid;
+              const isEvStop = Boolean(plan.ev_charging_stop_nodes?.includes(route.destination_id));
+
+              return (
+                <Fragment key={rid}>
+                  <div
+                    className={`journey-leg-connector ${isHovered ? "active" : ""}`}
+                    onMouseEnter={() => onHoverRoute?.(rid)}
+                    onMouseLeave={() => onHoverRoute?.(null)}
+                    title={`Leg ${idx + 1}: ${route.origin_id} → ${route.destination_id} (Hover to spotlight)`}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", fontSize: "0.62rem", fontWeight: 600, color: "#64748b" }}>
+                      <span>₹{route.cost}</span>
+                      <span>{route.time_hours}h</span>
+                    </div>
+                    <div className={`journey-leg-line ${route.risk_prior >= 0.2 ? "elevated" : ""}`} />
+                    <span
+                      style={{
+                        fontSize: "0.58rem",
+                        fontWeight: 700,
+                        padding: "1px 5px",
+                        borderRadius: 4,
+                        background: route.risk_prior >= 0.2 ? "rgba(220,38,38,0.1)" : "rgba(22,163,74,0.1)",
+                        color: route.risk_prior >= 0.2 ? "#dc2626" : "#16a34a",
+                      }}
+                    >
+                      {(route.risk_prior * 100).toFixed(0)}% risk
+                    </span>
+                  </div>
+
+                  <div
+                    className="journey-stop-node"
+                    onMouseEnter={() => onHoverRoute?.(rid)}
+                    onMouseLeave={() => onHoverRoute?.(null)}
+                  >
+                    <div className={`journey-stop-pill ${isDest ? "end" : "step"}`}>
+                      {isDest ? "END" : idx + 2}
+                    </div>
+                    <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#0f172a", whiteSpace: "nowrap" }}>
+                      {dest?.name || route.destination_id}
+                      {isEvStop && " (EV)"}
+                    </div>
+                    <div style={{ fontSize: "0.62rem", color: "#64748b" }}>
+                      +{cumTimes[idx]}h
+                    </div>
+                  </div>
+                </Fragment>
+              );
+            })}
+          </div>
+
+          {/* 2. Route Corridor Health Spectrum Ribbon */}
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.68rem", fontWeight: 700, color: "#475569", marginBottom: 4 }}>
+              <span>Corridor Risk Spectrum</span>
+              <span>{lowPct}% Low Risk · {medPct}% Moderate · {highPct}% Elevated</span>
+            </div>
+            <div style={{ width: "100%", height: 5, borderRadius: 3, display: "flex", overflow: "hidden", background: "#e2e8f0" }}>
+              {lowPct > 0 && <div style={{ width: `${lowPct}%`, background: "#16a34a" }} title={`Low Risk: ${lowPct}%`} />}
+              {medPct > 0 && <div style={{ width: `${medPct}%`, background: "#d97706" }} title={`Moderate Risk: ${medPct}%`} />}
+              {highPct > 0 && <div style={{ width: `${highPct}%`, background: "#dc2626" }} title={`Elevated Risk: ${highPct}%`} />}
+            </div>
+            {bottleneckRoute && (
+              <div style={{ fontSize: "0.68rem", color: "#64748b", marginTop: 5, display: "flex", alignItems: "center", gap: 4 }}>
+                <AlertTriangle size={11} style={{ color: "#d97706" }} />
+                <span>
+                  <strong>Highest Risk Segment:</strong> {bottleneckOrigin} → {bottleneckDest} ({(bottleneckRoute.risk_prior * 100).toFixed(0)}% prior risk · {bottleneckRoute.time_hours}h)
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. Detailed Leg Breakdown Table */}
         <table className="data-table">
           <thead>
             <tr>
@@ -598,11 +756,25 @@ export function AnalysisPanel({ plans, graph, selectedPlanIndex, onSelectPlan }:
               if (!route) return null;
               const originName = graph.depots.find((d) => d.id === route.origin_id)?.name || route.origin_id;
               const destName = graph.depots.find((d) => d.id === route.destination_id)?.name || route.destination_id;
+              const isHovered = hoveredRouteId === rid;
+
               return (
-                <tr key={rid} className="animate-fade-in" style={{ animationDelay: `${i * 60}ms` }}>
-                  <td style={{ color: "var(--text-muted)", fontWeight: 600, fontSize: "0.72rem" }}>{i + 1}</td>
+                <tr
+                  key={rid}
+                  className="animate-fade-in"
+                  style={{
+                    animationDelay: `${i * 60}ms`,
+                    background: isHovered ? "rgba(37,99,235,0.08)" : undefined,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={() => onHoverRoute?.(rid)}
+                  onMouseLeave={() => onHoverRoute?.(null)}
+                >
+                  <td style={{ color: isHovered ? "#2563eb" : "var(--text-muted)", fontWeight: 700, fontSize: "0.72rem" }}>
+                    {i + 1}
+                  </td>
                   <td>
-                    <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "#0f172a" }}>
+                    <div style={{ fontWeight: 600, fontSize: "0.8rem", color: isHovered ? "#2563eb" : "#0f172a" }}>
                       {originName} <span style={{ color: "#94a3b8" }}>→</span> {destName}
                     </div>
                     <div style={{ fontSize: "0.68rem", color: "#94a3b8", fontFamily: "var(--font-mono)" }}>

@@ -171,7 +171,8 @@ export async function createPlan(
   truckClass: string = "hcv",
   maxPayloadKg?: number,
   gvwKg?: number,
-  fuelType: string = "diesel"
+  fuelType: string = "diesel",
+  disruptions?: Disruption[]
 ): Promise<Plan[]> {
   return request("/v1/plan", {
     method: "POST",
@@ -181,6 +182,7 @@ export async function createPlan(
       fuel_type: fuelType,
       ...(maxPayloadKg ? { max_payload_kg: maxPayloadKg } : {}),
       ...(gvwKg ? { gross_vehicle_weight_kg: gvwKg } : {}),
+      ...(disruptions && disruptions.length > 0 ? { disruptions } : {}),
     }),
   });
 }
@@ -192,8 +194,55 @@ export async function injectDisruption(disruption: Disruption): Promise<Disrupti
   });
 }
 
+export async function clearDisruptions(): Promise<{ status: string }> {
+  return request("/v1/disrupt", { method: "DELETE" });
+}
+
 export async function replan(planId: string): Promise<Plan> {
   return request(`/v1/plan/${planId}/replan`, { method: "POST" });
+}
+
+/* ── Active Planner Session Sync ──────────────────────────────── */
+
+export interface AegisSession {
+  graph: GraphInput;
+  sourceId: string;
+  destId: string;
+  sourceName?: string;
+  destName?: string;
+  goodsType: string;
+  truckClass: string;
+  fuelType: string;
+  maxPayloadKg?: number;
+  gvwKg?: number;
+  plans: Plan[];
+  selectedPlanIndex: number;
+  activePlan: Plan;
+  timestamp: number;
+}
+
+const SESSION_KEY = "aegis_active_session";
+
+export function saveActiveSession(session: AegisSession): void {
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch {
+      /* ignore storage errors */
+    }
+  }
+}
+
+export function getActiveSession(): AegisSession | null {
+  if (typeof window !== "undefined") {
+    try {
+      const data = localStorage.getItem(SESSION_KEY);
+      return data ? (JSON.parse(data) as AegisSession) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /* ── AEGIS planning-pipeline trace (visualiser) ───────────────── */

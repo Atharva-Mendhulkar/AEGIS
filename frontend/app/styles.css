@@ -693,3 +693,158 @@ a:hover { color: var(--accent-hover); }
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
+/* ── Route Sequence Badges & Simulation HUD ──────────────────── */
+.depot-badge-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-family: var(--font);
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.depot-badge-inner:hover {
+  transform: scale(1.15);
+}
+
+.depot-badge-inner.start {
+  width: 32px;
+  height: 32px;
+  background: #2563eb;
+  color: #ffffff;
+  border: 2.5px solid #ffffff;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.depot-badge-inner.end {
+  width: 32px;
+  height: 32px;
+  background: #dc2626;
+  color: #ffffff;
+  border: 2.5px solid #ffffff;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.depot-badge-inner.step {
+  width: 26px;
+  height: 26px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 2.5px solid #2563eb;
+  font-size: 11px;
+}
+
+.sim-hud {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 500;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.route-flow-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* ── Route Journey Stepper (Timeline) ───────────────────────── */
+.journey-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 10px 6px;
+  margin: 6px 0;
+}
+
+.journey-stop-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.journey-stop-pill {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+  transition: transform 0.15s ease;
+}
+
+.journey-stop-pill.start {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.journey-stop-pill.end {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.journey-stop-pill.step {
+  background: #ffffff;
+  color: #0f172a;
+  border: 2px solid #2563eb;
+}
+
+.journey-leg-connector {
+  flex: 1;
+  min-width: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.journey-leg-connector:hover,
+.journey-leg-connector.active {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+.journey-leg-line {
+  width: 100%;
+  height: 3px;
+  background: #2563eb;
+  border-radius: 2px;
+  position: relative;
+}
+
+.journey-leg-line.disrupted {
+  background: #dc2626;
+}
+
+.journey-leg-line.elevated {
+  background: #d97706;
+}
+

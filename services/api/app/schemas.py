@@ -81,6 +81,12 @@ class PlanRequest(BaseModel):
         description="Propulsion type: diesel | petrol | electric",
     )
 
+    # Injected disruptions for scenario planning
+    disruptions: list[Disruption] = Field(
+        default_factory=list,
+        description="Optional inline disruptions for scenario replanning",
+    )
+
 
 class AegisTraceRequest(BaseModel):
     """Scenario for the AEGIS planning pipeline visualiser — no stored

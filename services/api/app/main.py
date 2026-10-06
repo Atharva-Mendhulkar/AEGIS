@@ -212,8 +212,9 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
         )
 
     # ── Run AEGIS planner (full Pareto frontier) ─────────────────────────
+    disruptions = request.disruptions if request.disruptions else store.disruptions
     try:
-        raw_plans = planner().frontier(shipment, store.disruptions)
+        raw_plans = planner().frontier(shipment, disruptions)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -221,7 +222,6 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
         raise HTTPException(status_code=422, detail="No feasible route found.")
 
     # ── Enrich plans with risk info ──────────────────────────────────────
-    disruptions = store.disruptions
     responses: list[PlanResponse] = []
 
     for plan in raw_plans:
@@ -313,6 +313,12 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
 def inject_disruption(disruption: Disruption) -> Disruption:
     store.disruptions.append(disruption)
     return disruption
+
+
+@app.delete("/v1/disrupt", dependencies=[Depends(auth)])
+def clear_disruptions() -> dict[str, str]:
+    store.disruptions.clear()
+    return {"status": "cleared"}
 
 
 @app.post("/v1/plan/{plan_id}/replan", dependencies=[Depends(auth)])

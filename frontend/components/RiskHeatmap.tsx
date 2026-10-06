@@ -93,11 +93,11 @@ export function RiskHeatmap({ graph, disruptions }: Props) {
       ctx.textAlign = "center";
       ctx.fillText(`${(risk * 100).toFixed(0)}%`, mx, my - 6);
 
-      // Disruption icon
+      // Disruption indicator
       if (disrupted) {
         ctx.fillStyle = "#ef4444";
-        ctx.font = "14px sans-serif";
-        ctx.fillText("⚡", mx + 14, my - 2);
+        ctx.font = "bold 9px Inter, sans-serif";
+        ctx.fillText("(!)", mx + 16, my - 6);
       }
     }
 

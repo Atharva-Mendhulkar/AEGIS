@@ -299,7 +299,7 @@ export function MiniGameTree({ depth: initialDepth }: Props) {
         />
         <span style={{ fontSize: "0.78rem", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{depth}</span>
         <button className="btn btn-secondary btn-sm" onClick={() => setSeed((s) => s + 1)}>
-          🎲 Regenerate
+          Regenerate
         </button>
         <div style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--text-dim)", display: "flex", gap: 12 }}>
           <span><span style={{ color: "#10b981" }}>●</span> MAX (Planner)</span>

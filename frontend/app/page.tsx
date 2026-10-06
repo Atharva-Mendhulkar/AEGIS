@@ -1,13 +1,20 @@
 "use client";
 import { useState, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { SourceDestPicker } from "../components/SourceDestPicker";
 import { AnalysisPanel } from "../components/AnalysisPanel";
 import { ParetoChart } from "../components/ParetoChart";
 import { EventConsole } from "../components/EventConsole";
 import { INDIA_NETWORK, type FuelType } from "../lib/constants";
 import type { Plan, PlanPoint, GraphInput, TruckClass } from "../lib/api";
-import { loadGraph, loadShipments, createPlan, fetchTruckClasses } from "../lib/api";
+import {
+  loadGraph,
+  loadShipments,
+  createPlan,
+  fetchTruckClasses,
+  saveActiveSession,
+} from "../lib/api";
 import { buildDynamicNetwork, type CustomLocation } from "../lib/dynamicGraph";
 import {
   TrendingUp,
@@ -19,6 +26,7 @@ import {
   Play,
   RotateCcw,
   Navigation,
+  Brain,
 } from "lucide-react";
 
 // Dynamic import for MapView (Leaflet needs window object)
@@ -79,6 +87,7 @@ export default function RoutePlannerPage() {
   const [truckClasses, setTruckClasses] = useState<TruckClass[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState(0);
+  const [hoveredRouteId, setHoveredRouteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
@@ -168,6 +177,22 @@ export default function RoutePlannerPage() {
         throw new Error("No feasible compliant route found for this corridor configuration.");
       }
       setPlans(result);
+      saveActiveSession({
+        graph: dynamicResult.graph,
+        sourceId: dynamicResult.sourceId,
+        destId: dynamicResult.destinationId,
+        sourceName: sourceLoc?.name || dynamicResult.sourceId,
+        destName: destLoc?.name || dynamicResult.destinationId,
+        goodsType,
+        truckClass,
+        fuelType,
+        maxPayloadKg,
+        gvwKg,
+        plans: result,
+        selectedPlanIndex: 0,
+        activePlan: result[0],
+        timestamp: Date.now(),
+      });
     } catch (err: any) {
       console.error("AEGIS Planning Error:", err);
       setError(err.message || "Route planning failed. Please ensure the backend is reachable.");
@@ -199,6 +224,28 @@ export default function RoutePlannerPage() {
     setError(null);
   };
 
+  const handleSelectPlanIndex = (idx: number) => {
+    setSelectedPlan(idx);
+    if (plans[idx]) {
+      saveActiveSession({
+        graph: dynamicGraph,
+        sourceId: activeSourceId,
+        destId: activeDestId,
+        sourceName: sourceLoc?.name || activeSourceId,
+        destName: destLoc?.name || activeDestId,
+        goodsType,
+        truckClass,
+        fuelType,
+        maxPayloadKg,
+        gvwKg,
+        plans,
+        selectedPlanIndex: idx,
+        activePlan: plans[idx],
+        timestamp: Date.now(),
+      });
+    }
+  };
+
   const chartData: PlanPoint[] = plans.map((p, i) => ({
     total_cost: p.total_cost,
     expected_regret: p.expected_regret,
@@ -214,10 +261,14 @@ export default function RoutePlannerPage() {
 
   return (
     <div className="fullscreen-map-wrapper">
-      {/* Full-Screen OpenStreetMap */}
+      {/* Full-Screen OpenStreetMap with Active Route & Alternative Corridors */}
       <MapView
         graph={dynamicGraph}
-        plans={plans.length > 0 ? [plans[selectedPlan] || plans[0]] : []}
+        plans={plans}
+        selectedPlanIndex={selectedPlan}
+        onSelectPlanIndex={handleSelectPlanIndex}
+        hoveredRouteId={hoveredRouteId}
+        onHoverRoute={setHoveredRouteId}
         source={activeSourceId}
         destination={activeDestId}
         onSelectDepot={handleSelectDepot}
@@ -341,7 +392,7 @@ export default function RoutePlannerPage() {
               }}
             >
               <p style={{ color: "var(--danger)", fontSize: "0.825rem", margin: 0, fontWeight: 600 }}>
-                ⚠ {error}
+                {error}
               </p>
             </div>
           )}
@@ -370,15 +421,34 @@ export default function RoutePlannerPage() {
                   <Sparkles size={14} style={{ color: "var(--accent)" }} />
                   Pareto-Optimal Routing Results
                 </div>
-                <span className="badge badge-accent">{plans.length} Candidates</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="badge badge-accent">{plans.length} Candidates</span>
+                  <Link
+                    href="/visualizer"
+                    className="btn btn-primary btn-sm"
+                    style={{
+                      textDecoration: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "4px 10px",
+                      fontSize: "0.725rem",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <Brain size={12} /> Inspect in Visualizer →
+                  </Link>
+                </div>
               </div>
 
-              {/* Dynamic Analysis Panel (Radar, Hop Bar Chart, Transit Profile, Hop Table) */}
+              {/* Dynamic Analysis Panel (Radar, Hop Bar Chart, Transit Profile, Visual Journey, Hop Table) */}
               <AnalysisPanel
                 plans={plans}
                 graph={dynamicGraph}
                 selectedPlanIndex={selectedPlan}
-                onSelectPlan={setSelectedPlan}
+                onSelectPlan={handleSelectPlanIndex}
+                hoveredRouteId={hoveredRouteId}
+                onHoverRoute={setHoveredRouteId}
               />
 
               {/* Pareto Frontier Scatter Chart */}
@@ -392,7 +462,7 @@ export default function RoutePlannerPage() {
                 <ParetoChart
                   plans={chartData}
                   selectedIndex={selectedPlan}
-                  onSelect={(i) => setSelectedPlan(i)}
+                  onSelect={handleSelectPlanIndex}
                 />
               </div>
             </div>
