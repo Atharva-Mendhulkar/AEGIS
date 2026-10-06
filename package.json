@@ -1,6 +1,0 @@
-{
-  "devDependencies": {
-    "@types/lodash": "^4.17.25",
-    "@types/react-dom": "^19.3.0"
-  }
-}

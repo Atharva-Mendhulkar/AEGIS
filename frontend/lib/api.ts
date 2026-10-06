@@ -52,6 +52,17 @@ export interface DisruptionInfo {
   description: string;
 }
 
+export interface StateFuelInfo {
+  state: string;
+  label: string;
+  distance_km: number;
+  fuel_price_per_unit: number;
+  road_quality: number;
+  toll_multiplier: number;
+  fuel_cost_inr: number;
+  toll_cost_inr: number;
+}
+
 export interface Plan {
   id: string;
   shipment_id: string;
@@ -65,6 +76,24 @@ export interface Plan {
   gross_vehicle_weight_kg: number;
   cargo_weight_kg: number;
   capacity_utilisation_pct: number;
+  // Fuel / operating cost breakdown (real ₹)
+  fuel_type: string;
+  fuel_cost_inr: number;
+  fuel_consumption: number;
+  fuel_unit: string;
+  fuel_price_per_unit: number;
+  toll_cost_inr: number;
+  driver_cost_inr: number;
+  total_operating_cost_inr: number;
+  market_freight_cost_inr: number;
+  distance_km: number;
+  // EV-specific
+  ev_charging_stops: number;
+  ev_charging_stop_nodes: string[];
+  ev_charger_available: boolean;
+  ev_range_km: number;
+  // State-wise economics
+  state_breakdown: StateFuelInfo[];
   // Risk intelligence
   potential_risks: DisruptionInfo[];
   risk_score: number;
@@ -96,31 +125,6 @@ export interface SimulationEvent {
     | "replan_started"
     | "replan_finalized";
   payload: Record<string, unknown>;
-}
-
-export interface AlgorithmResult {
-  algorithm: string;
-  path: string[] | null;
-  cost: number | null;
-  nodes_explored: number;
-  time_ms: number;
-  path_length: number;
-}
-
-export interface SearchTraceStep {
-  step: number;
-  node: string;
-  parent: string | null;
-  cost_so_far: number;
-  frontier_size: number;
-  is_goal: boolean;
-}
-
-export interface SearchTrace {
-  algorithm: string;
-  steps: SearchTraceStep[];
-  final_path: string[] | null;
-  final_cost: number | null;
 }
 
 /* ── API calls ────────────────────────────────────────────────── */
@@ -166,13 +170,15 @@ export async function createPlan(
   shipmentId: string,
   truckClass: string = "hcv",
   maxPayloadKg?: number,
-  gvwKg?: number
+  gvwKg?: number,
+  fuelType: string = "diesel"
 ): Promise<Plan[]> {
   return request("/v1/plan", {
     method: "POST",
     body: JSON.stringify({
       shipment_id: shipmentId,
       truck_class: truckClass,
+      fuel_type: fuelType,
       ...(maxPayloadKg ? { max_payload_kg: maxPayloadKg } : {}),
       ...(gvwKg ? { gross_vehicle_weight_kg: gvwKg } : {}),
     }),
@@ -190,42 +196,54 @@ export async function replan(planId: string): Promise<Plan> {
   return request(`/v1/plan/${planId}/replan`, { method: "POST" });
 }
 
-export async function fetchPareto(): Promise<Plan[]> {
-  return request("/v1/pareto");
+/* ── AEGIS planning-pipeline trace (visualiser) ───────────────── */
+
+export interface AegisTraceEdge {
+  route_id: string;
+  origin: string;
+  destination: string;
+  base_cost: number;
+  risk: number;
+  weighted_cost: number;
+  time_hours: number;
 }
 
-export async function fetchBenchmark(
-  planId: string
-): Promise<{ plan_id: string; aegis_cost: number; aegis_regret: number }> {
-  return request(`/v1/benchmark/ortools?plan_id=${planId}`);
+export interface AegisTraceCandidate {
+  risk_weight: number;
+  path_nodes: string[] | null;
+  edges: AegisTraceEdge[];
+  total_cost: number;
+  expected_regret: number;
+  blocked_edges: string[];
+  non_compliant_edges: string[];
+  on_frontier: boolean;
 }
 
-export async function compareAlgorithms(
-  shipmentId: string
-): Promise<AlgorithmResult[]> {
-  return request("/v1/plan/compare", {
+export interface AegisTrace {
+  origin: string;
+  destination: string;
+  risk_grid: number[];
+  candidates: AegisTraceCandidate[];
+}
+
+export interface AegisTraceInput {
+  origin_id: string;
+  destination_id: string;
+  goods_type?: string;
+  weight_kg?: number;
+  disruptions?: Disruption[];
+}
+
+export async function fetchAegisTrace(input: AegisTraceInput): Promise<AegisTrace> {
+  return request("/v1/plan/aegis-trace", {
     method: "POST",
-    body: JSON.stringify({ shipment_id: shipmentId }),
+    body: JSON.stringify({
+      origin_id: input.origin_id,
+      destination_id: input.destination_id,
+      goods_type: input.goods_type ?? "general",
+      weight_kg: input.weight_kg ?? 1000,
+      disruptions: input.disruptions ?? [],
+    }),
   });
 }
 
-export async function fetchSearchTrace(
-  shipmentId: string,
-  algorithm: string = "ucs"
-): Promise<SearchTrace> {
-  return request("/v1/plan/trace", {
-    method: "POST",
-    body: JSON.stringify({ shipment_id: shipmentId, algorithm }),
-  });
-}
-
-export function createSimulationWS(): WebSocket {
-  const wsUrl = (
-    process.env.NEXT_PUBLIC_WS_URL ??
-    (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(
-      /^http/,
-      "ws"
-    )
-  );
-  return new WebSocket(`${wsUrl}/v1/stream/simulation`);
-}

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import heapq
 import math
-import random
 from collections import deque
 from collections.abc import Callable
 from typing import TypeVar
@@ -11,7 +10,7 @@ Node = TypeVar("Node", bound=str)
 Neighbors = Callable[[Node], list[tuple[Node, float]]]
 Heuristic = Callable[[str], float]
 
-_EARTH_RADIUS_KM = 6371.0
+_EARTH_RADIUS_KM = 6371.0088
 
 
 def bfs(start: Node, goal: Node, neighbors: Neighbors[Node]) -> list[Node] | None:
@@ -146,39 +145,6 @@ def hill_climbing(
     return path
 
 
-def random_restart(
-    start: Node,
-    goal: Node,
-    neighbors: Neighbors[Node],
-    search_fn: Callable[..., list[Node] | None],
-    rng: random.Random,
-    iterations: int = 10,
-) -> list[Node] | None:
-    """Random-restart meta-search.
-
-    Runs ``search_fn`` across randomly shuffled neighbour orderings for
-    ``iterations`` restarts and keeps the shortest (fewest-hop) goal path found.
-    """
-    best: list[Node] | None = None
-    for _ in range(iterations):
-
-        def randomized(
-            node: Node,
-            _orig: Neighbors[Node] = neighbors,
-            _rng: random.Random = rng,
-        ) -> list[tuple[Node, float]]:
-            result = list(_orig(node))
-            _rng.shuffle(result)
-            return result
-
-        path = search_fn(start, goal, randomized)
-        if path is None:
-            continue
-        if best is None or len(path) < len(best):
-            best = path
-    return best
-
-
 def great_circle_heuristic(
     coordinates: dict[str, tuple[float, float]], goal: str, base_cost_per_km: float = 1.0
 ) -> Heuristic:
@@ -193,12 +159,13 @@ def great_circle_heuristic(
 
     def heuristic(node: str) -> float:
         lat, lon = coordinates[node]
-        return base_cost_per_km * _haversine(lat, lon, goal_lat, goal_lon)
+        return base_cost_per_km * haversine_km(lat, lon, goal_lat, goal_lon)
 
     return heuristic
 
 
-def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two WGS-84 points, in km."""
     lat1, lon1, lat2, lon2 = map(math.radians, (lat1, lon1, lat2, lon2))
     dlat = lat2 - lat1
     dlon = lon2 - lon1

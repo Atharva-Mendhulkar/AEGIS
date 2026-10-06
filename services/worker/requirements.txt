@@ -1,5 +1,0 @@
-celery>=5.4
-redis>=5.0
-ortools>=9.10
-sqlalchemy>=2.0
-psycopg[binary]>=3.2

@@ -5,7 +5,7 @@ import { SourceDestPicker } from "../components/SourceDestPicker";
 import { AnalysisPanel } from "../components/AnalysisPanel";
 import { ParetoChart } from "../components/ParetoChart";
 import { EventConsole } from "../components/EventConsole";
-import { INDIA_NETWORK } from "../lib/constants";
+import { INDIA_NETWORK, type FuelType } from "../lib/constants";
 import type { Plan, PlanPoint, GraphInput, TruckClass } from "../lib/api";
 import { loadGraph, loadShipments, createPlan, fetchTruckClasses } from "../lib/api";
 import { buildDynamicNetwork, type CustomLocation } from "../lib/dynamicGraph";
@@ -73,6 +73,7 @@ export default function RoutePlannerPage() {
 
   const [goodsType, setGoodsType] = useState("general");
   const [truckClass, setTruckClass] = useState("hcv");
+  const [fuelType, setFuelType] = useState<FuelType>("diesel");
   const [maxPayloadKg, setMaxPayloadKg] = useState<number | undefined>(undefined);
   const [gvwKg, setGvwKg] = useState<number | undefined>(undefined);
   const [truckClasses, setTruckClasses] = useState<TruckClass[]>([]);
@@ -161,8 +162,8 @@ export default function RoutePlannerPage() {
         },
       ]);
 
-      // 4. Generate plans via AEGIS (truck-aware, Pareto frontier)
-      const result = await createPlan(shipmentId, truckClass, maxPayloadKg, gvwKg);
+      // 4. Generate plans via AEGIS (truck-aware, fuel-aware, Pareto frontier)
+      const result = await createPlan(shipmentId, truckClass, maxPayloadKg, gvwKg, fuelType);
       if (!result || result.length === 0) {
         throw new Error("No feasible compliant route found for this corridor configuration.");
       }
@@ -185,7 +186,7 @@ export default function RoutePlannerPage() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [sourceLoc, destLoc, goodsType, truckClass, maxPayloadKg, gvwKg]);
+  }, [sourceLoc, destLoc, goodsType, truckClass, maxPayloadKg, gvwKg, fuelType]);
 
   const handleClear = () => {
     setSourceLoc(null);
@@ -311,6 +312,7 @@ export default function RoutePlannerPage() {
             maxPayloadKg={maxPayloadKg}
             gvwKg={gvwKg}
             truckClasses={truckClasses}
+            fuelType={fuelType}
             onSourceSelect={(loc) => {
               setSourceLoc(loc);
               if (loc.id) setActiveSourceId(loc.id);
@@ -324,6 +326,7 @@ export default function RoutePlannerPage() {
             onTruckClassChange={setTruckClass}
             onMaxPayloadChange={setMaxPayloadKg}
             onGvwChange={setGvwKg}
+            onFuelTypeChange={setFuelType}
             onPresetSelect={handlePresetSelect}
           />
 

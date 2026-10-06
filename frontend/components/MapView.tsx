@@ -1,28 +1,34 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { GraphInput, Plan } from "../lib/api";
+import type { GraphInput, Plan, Disruption } from "../lib/api";
 import { MAP_CONFIG, riskColor } from "../lib/constants";
 
 let L: typeof import("leaflet") | null = null;
 
 interface Props {
   graph: GraphInput;
-  plans: Plan[];
+  plans?: Plan[];
   source: string | null;
   destination: string | null;
-  onSelectDepot: (depotId: string) => void;
+  onSelectDepot?: (depotId: string) => void;
   searchedLocation?: { name: string; latitude: number; longitude: number } | null;
   height?: string | number;
+  /** Risk-heatmap overlay: colour every corridor by effective risk. */
+  riskHeatmap?: boolean;
+  /** Active disruptions folded into the heatmap (Bayesian union). */
+  disruptions?: Disruption[];
 }
 
 export function MapView({
   graph,
-  plans,
+  plans = [],
   source,
   destination,
   onSelectDepot,
   searchedLocation,
   height = "100%",
+  riskHeatmap = false,
+  disruptions = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -162,6 +168,16 @@ export function MapView({
     const depotMap: Record<string, { lat: number; lng: number }> = {};
     const plannedRouteIds = new Set(plans.flatMap((p) => p.route_ids));
 
+    // Effective risk = independent-event Bayesian union of the route's prior
+    // and every active disruption on that edge (same model as the planner).
+    const effectiveRisk = (routeId: string, basePrior: number): number => {
+      let survival = 1 - basePrior;
+      for (const d of disruptions) {
+        if (d.edge_id === routeId) survival *= 1 - d.severity;
+      }
+      return 1 - survival;
+    };
+
     // 1. Draw network routes underneath markers
     for (const route of graph.routes) {
       const origin = graph.depots.find((d) => d.id === route.origin_id);
@@ -169,14 +185,48 @@ export function MapView({
       if (!origin || !dest) continue;
 
       const isPlanned = plannedRouteIds.has(route.id);
-      // Strict 4-color palette: Cobalt for planned, Slate for available, Crimson for high risk
-      const color = isPlanned
-        ? "#2563eb"
-        : route.risk_prior >= 0.2
-        ? "rgba(220, 38, 38, 0.45)"
-        : "rgba(100, 116, 139, 0.35)";
-      const weight = isPlanned ? 4.5 : 1.5;
-      const opacity = isPlanned ? 1 : 0.6;
+      const effRisk = riskHeatmap ? effectiveRisk(route.id, route.risk_prior) : route.risk_prior;
+      const disrupted = disruptions.some((d) => d.edge_id === route.id);
+
+      // Strict 4-color palette in normal mode; risk gradient in heatmap mode
+      let color: string;
+      let weight: number;
+      let opacity: number;
+      let dashArray: string | undefined;
+
+      if (riskHeatmap) {
+        color = riskColor(effRisk);
+        weight = 2 + effRisk * 5;
+        opacity = 0.55 + effRisk * 0.45;
+        dashArray = disrupted ? "5 4" : undefined;
+      } else {
+        // Cobalt for planned, Slate for available, Crimson for high risk
+        color = isPlanned
+          ? "#2563eb"
+          : route.risk_prior >= 0.2
+          ? "rgba(220, 38, 38, 0.45)"
+          : "rgba(100, 116, 139, 0.35)";
+        weight = isPlanned ? 4.5 : 1.5;
+        opacity = isPlanned ? 1 : 0.6;
+        dashArray = isPlanned ? undefined : "6 4";
+      }
+
+      // Heat glow underneath hot corridors
+      if (riskHeatmap && effRisk > 0.3) {
+        const glow = L.polyline(
+          [
+            [origin.latitude, origin.longitude],
+            [dest.latitude, dest.longitude],
+          ],
+          {
+            color: riskColor(effRisk),
+            weight: weight + 8,
+            opacity: 0.18,
+            interactive: false,
+          }
+        ).addTo(map);
+        linesRef.current.push(glow);
+      }
 
       const line = L.polyline(
         [
@@ -187,18 +237,18 @@ export function MapView({
           color,
           weight,
           opacity,
-          dashArray: isPlanned ? undefined : "6 4",
+          dashArray,
         }
       ).addTo(map);
 
-      // Tooltip on hover
-      line.bindTooltip(
-        `<strong>${route.id}</strong><br/>Cost: ₹${route.cost} · Risk: ${(route.risk_prior * 100).toFixed(0)}% · ${route.time_hours}h`,
-        {
-          sticky: true,
-          className: "route-tooltip",
-        }
-      );
+      // Tooltip on hover — shows effective (disruption-aware) risk in heatmap mode
+      const riskLabel = riskHeatmap
+        ? `<strong>${route.id}</strong>${disrupted ? " ⚡" : ""}<br/>Effective risk: <strong>${(effRisk * 100).toFixed(0)}%</strong>${disrupted ? " (disrupted)" : ""}<br/>Base: ₹${route.cost} · ${route.time_hours}h`
+        : `<strong>${route.id}</strong><br/>Cost: ₹${route.cost} · Risk: ${(route.risk_prior * 100).toFixed(0)}% · ${route.time_hours}h`;
+      line.bindTooltip(riskLabel, {
+        sticky: true,
+        className: "route-tooltip",
+      });
 
       // Animated dash for planned routes
       if (isPlanned) {
@@ -252,7 +302,7 @@ export function MapView({
       marker.bindTooltip(label);
 
       marker.on("click", () => {
-        onSelectDepot(depot.id);
+        onSelectDepot?.(depot.id);
       });
 
       marker.bindPopup(
@@ -273,7 +323,7 @@ export function MapView({
       markersRef.current.push(marker);
     }
 
-    // 3. Zoom-to-fit planned routes
+    // 3. Zoom-to-fit: planned routes, or the whole network in heatmap mode
     if (plans.length > 0) {
       const planDepotIds = new Set<string>();
       for (const plan of plans) {
@@ -297,8 +347,18 @@ export function MapView({
           maxZoom: 7,
         });
       }
+    } else if (riskHeatmap && graph.depots.length > 1) {
+      // Heatmap card: frame the entire corridor network
+      const bounds = graph.depots.map(
+        (d) => [d.latitude, d.longitude] as [number, number]
+      );
+      map.fitBounds(bounds, {
+        paddingTopLeft: [30, 30],
+        paddingBottomRight: [30, 30],
+        maxZoom: 6,
+      });
     }
-  }, [ready, graph, plans, source, destination, onSelectDepot]);
+  }, [ready, graph, plans, source, destination, onSelectDepot, disruptions, riskHeatmap]);
 
   return (
     <div style={{ position: "relative", width: "100%", height, minHeight: "100%" }}>
@@ -333,22 +393,66 @@ export function MapView({
           zIndex: 500,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563eb", border: "2px solid #fff", boxShadow: "0 0 0 1px #2563eb" }} />
-          Source
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#dc2626", border: "2px solid #fff", boxShadow: "0 0 0 1px #dc2626" }} />
-          Destination
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 18, height: 3.5, background: "#2563eb", borderRadius: 2 }} />
-          Planned Route
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 18, height: 2, background: "#94a3b8", borderRadius: 2, borderBottom: "1px dashed #64748b" }} />
-          Available Corridor
-        </div>
+        {riskHeatmap ? (
+          <>
+            <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 2 }}>
+              Corridor Risk
+            </div>
+            <div
+              style={{
+                width: 130,
+                height: 7,
+                borderRadius: 4,
+                background:
+                  "linear-gradient(90deg, rgba(100,116,139,0.55) 0%, rgba(100,116,139,0.55) 15%, #d97706 50%, #dc2626 100%)",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                width: 130,
+                fontSize: "0.62rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              <span>0%</span>
+              <span>30%</span>
+              <span>50%+</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+              <span style={{ width: 18, height: 3, borderRadius: 2, background: "rgba(220,38,38,0.8)" }} />
+              ⚡ Disrupted corridor
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563eb", border: "2px solid #fff", boxShadow: "0 0 0 1px #2563eb" }} />
+              Source
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#dc2626", border: "2px solid #fff", boxShadow: "0 0 0 1px #dc2626" }} />
+              Destination
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563eb", border: "2px solid #fff", boxShadow: "0 0 0 1px #2563eb" }} />
+              Source
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#dc2626", border: "2px solid #fff", boxShadow: "0 0 0 1px #dc2626" }} />
+              Destination
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 18, height: 3.5, background: "#2563eb", borderRadius: 2 }} />
+              Planned Route
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 18, height: 2, background: "#94a3b8", borderRadius: 2, borderBottom: "1px dashed #64748b" }} />
+              Available Corridor
+            </div>
+          </>
+        )}
       </div>
 
       <style jsx>{`

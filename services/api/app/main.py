@@ -1,24 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import heapq
-import time
-from collections import deque
-from typing import Any
 
 from aegis_core import Disruption, ResiliencePlanner
-from aegis_core.algorithms.search import (
-    astar,
-    bfs,
-    dfs,
-    great_circle_heuristic,
-    greedy_best_first,
-    hill_climbing,
-    ucs,
-)
-from aegis_core.domain.models import GraphInput, PlanStatus, Shipment
+from aegis_core.algorithms.search import haversine_km, ucs
+from aegis_core.domain.models import GraphInput, Plan, PlanStatus, Shipment
 from aegis_core.services.compliance import route_is_compliant
 from aegis_core.services.pareto import frontier
+from aegis_core.services.risk import edge_risk
 from fastapi import Depends, FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
@@ -26,14 +15,13 @@ from fastapi.security import APIKeyHeader
 from prometheus_client import Counter, generate_latest
 
 from .config import settings
+from .fuel_service import compute_fuel_cost
 from .schemas import (
     TRUCK_CLASSES,
-    BenchmarkResult,
-    CompareRequest,
+    AegisTraceRequest,
     DisruptionInfo,
     PlanRequest,
     PlanResponse,
-    TraceRequest,
 )
 from .store import store
 
@@ -113,16 +101,32 @@ def _aggregate_risk_score(risks: list[DisruptionInfo]) -> float:
     return min(total, 1.0)
 
 
-def _recommendation(is_best: bool, risk_score: float, utilisation: float) -> str:
+def _recommendation(
+    is_best: bool,
+    risk_score: float,
+    utilisation: float,
+    fuel_type: str = "diesel",
+    ev_charger_available: bool = True,
+    ev_stops: int = 0,
+) -> str:
     if is_best:
         parts = ["✅ Recommended route"]
         if risk_score > 0.5:
             parts.append("— monitor active disruptions")
         if utilisation > 90:
             parts.append("— truck near capacity limit")
+        if fuel_type == "electric":
+            if not ev_charger_available:
+                parts.append("— ⚠ insufficient DC fast chargers for required stops")
+            elif ev_stops > 0:
+                parts.append(f"— {ev_stops} charging stop(s) planned")
+            else:
+                parts.append("— within single-charge EV range")
         return ". ".join(parts) + "."
     if risk_score >= 0.75:
         return "⚠ High disruption risk — consider alternate corridor."
+    if fuel_type == "electric" and not ev_charger_available:
+        return "⚠ Corridor lacks enough EV fast chargers — avoid for electric fleets."
     if risk_score >= 0.5:
         return "⚠ Moderate risk — re-check before dispatch."
     return "Alternative viable route."
@@ -134,6 +138,40 @@ def _resolve_truck(request: PlanRequest) -> tuple[int, int]:
     max_payload = request.max_payload_kg or cls["max_payload_kg"]
     gvw = request.gross_vehicle_weight_kg or cls["max_gvw_kg"]
     return int(max_payload), int(gvw)
+
+
+# Road distance ≈ 1.25 × great-circle (empirical factor for the Indian NH grid)
+ROAD_CIRCUITY_FACTOR: float = 1.25
+
+
+def _plan_legs(route_ids: list[str]) -> list[dict]:
+    """Build ordered leg records for a plan with real-world distances.
+
+    Each leg carries {distance_km, time_hours, origin_id, destination_id} so
+    the fuel service can resolve state-level VAT, road quality and tolls.
+    """
+    graph = store.graph
+    depots = {d.id: d for d in graph.depots}
+    routes = {r.id: r for r in graph.routes}
+    legs: list[dict] = []
+    for rid in route_ids:
+        route = routes.get(rid)
+        if route is None:
+            continue
+        origin = depots.get(route.origin_id)
+        dest = depots.get(route.destination_id)
+        distance = 0.0
+        if origin is not None and dest is not None:
+            distance = haversine_km(
+                origin.latitude, origin.longitude, dest.latitude, dest.longitude
+            ) * ROAD_CIRCUITY_FACTOR
+        legs.append({
+            "distance_km": distance,
+            "time_hours": route.time_hours,
+            "origin_id": route.origin_id,
+            "destination_id": route.destination_id,
+        })
+    return legs
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +229,16 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
         risk_score = _aggregate_risk_score(risks)
         utilisation = round((cargo_kg / max_payload_kg) * 100, 1)
 
+        # ── Real-world, state-aware fuel / operating cost (₹) ────────────
+        legs = _plan_legs(plan.route_ids)
+        distance_km = sum(leg["distance_km"] for leg in legs)
+        fuel = compute_fuel_cost(
+            truck_class=request.truck_class,
+            fuel_type=request.fuel_type,
+            legs=legs,
+            cargo_weight_kg=cargo_kg,
+        )
+
         responses.append(PlanResponse(
             id=str(plan.id),
             shipment_id=plan.shipment_id,
@@ -203,26 +251,55 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
             gross_vehicle_weight_kg=gvw_kg,
             cargo_weight_kg=cargo_kg,
             capacity_utilisation_pct=utilisation,
+            fuel_type=request.fuel_type,
+            fuel_cost_inr=round(fuel.fuel_cost_inr, 2),
+            fuel_consumption=round(fuel.fuel_consumption, 2),
+            fuel_unit=fuel.fuel_unit,
+            fuel_price_per_unit=fuel.fuel_price_per_unit,
+            toll_cost_inr=round(fuel.toll_cost_inr, 2),
+            driver_cost_inr=round(fuel.driver_cost_inr, 2),
+            total_operating_cost_inr=round(fuel.total_operating_cost_inr, 2),
+            market_freight_cost_inr=round(fuel.market_freight_cost_inr, 2),
+            distance_km=round(distance_km, 1),
+            ev_charging_stops=fuel.ev_charging_stops,
+            ev_charging_stop_nodes=fuel.ev_charging_stop_nodes,
+            ev_charger_available=fuel.ev_charger_available,
+            ev_range_km=fuel.ev_range_km,
+            state_breakdown=fuel.state_breakdown,
             potential_risks=risks,
             risk_score=risk_score,
         ))
 
     # ── Pick "best" route ────────────────────────────────────────────────
-    # Score = 0.5 * normalised_cost + 0.5 * risk_score  (lower is better)
-    max_cost = max(p.total_cost for p in responses) or 1.0
-    min_cost = min(p.total_cost for p in responses)
-    cost_range = max_cost - min_cost or 1.0
+    # Optimisation is fuel-aware: we score on real ₹ operating cost
+    # (fuel at live pump prices + toll + driver wages) blended with risk,
+    # not on the abstract planner cost units. Electric routes whose
+    # corridor lacks enough DC fast chargers get a hard penalty so the
+    # optimiser prefers EV-feasible corridors.
+    max_op = max(p.total_operating_cost_inr for p in responses) or 1.0
+    min_op = min(p.total_operating_cost_inr for p in responses)
+    op_range = max_op - min_op or 1.0
 
     def combined_score(p: PlanResponse) -> float:
-        norm_cost = (p.total_cost - min_cost) / cost_range
-        return 0.5 * norm_cost + 0.5 * p.risk_score
+        norm_op_cost = (p.total_operating_cost_inr - min_op) / op_range
+        score = 0.5 * norm_op_cost + 0.5 * p.risk_score
+        if p.fuel_type == "electric" and p.ev_charging_stops > 0 and not p.ev_charger_available:
+            score += 0.35  # corridor cannot support required charging stops
+        return score
 
     best = min(responses, key=combined_score)
     best.is_best = True
 
     for p in responses:
         utilisation = p.capacity_utilisation_pct
-        p.recommendation = _recommendation(p.is_best, p.risk_score, utilisation)
+        p.recommendation = _recommendation(
+            p.is_best,
+            p.risk_score,
+            utilisation,
+            fuel_type=p.fuel_type,
+            ev_charger_available=p.ev_charger_available,
+            ev_stops=p.ev_charging_stops,
+        )
 
     # ── Persist & return ─────────────────────────────────────────────────
     for plan in raw_plans:
@@ -250,16 +327,109 @@ def replan(plan_id: str):
     return replanned
 
 
-@app.get("/v1/benchmark/ortools", response_model=BenchmarkResult, dependencies=[Depends(auth)])
-def benchmark(plan_id: str) -> BenchmarkResult:
-    plan = store.plans.get(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    return BenchmarkResult(
-        plan_id=plan_id,
-        aegis_cost=plan.total_cost,
-        aegis_regret=plan.expected_regret,
+@app.post("/v1/plan/aegis-trace", dependencies=[Depends(auth)])
+def aegis_trace(request: AegisTraceRequest) -> dict:
+    """Instrument the AEGIS planning pipeline stage by stage.
+
+    Stage 1 — compliance filter (restricted goods, fully blocked corridors)
+    Stage 2 — risk-weighted UCS sweep over the risk-weight grid; each weight
+              re-weights every edge to ``cost × (1 + w × edge_risk)``
+    Stage 3 — Pareto frontier selection on (total_cost, expected_regret)
+    """
+    p = planner()
+    shipment = Shipment(
+        id=f"viz-{request.origin_id}-{request.destination_id}",
+        origin_id=request.origin_id,
+        destination_id=request.destination_id,
+        goods_type=request.goods_type,
+        weight_kg=request.weight_kg,
     )
+    disruptions = request.disruptions
+
+    grid = ResiliencePlanner.DEFAULT_RISK_GRID
+    candidates: list[dict] = []
+
+    for weight in grid:
+        blocked: list[str] = []
+        non_compliant: list[str] = []
+
+        def neighbors(node: str, _w: float = weight) -> list[tuple[str, float]]:
+            outs: list[tuple[str, float]] = []
+            for route in p.adjacency.get(node, []):
+                if not route_is_compliant(route, shipment):
+                    if route.id not in non_compliant:
+                        non_compliant.append(route.id)
+                    continue
+                if any(d.edge_id == route.id and d.severity >= 1 for d in disruptions):
+                    if route.id not in blocked:
+                        blocked.append(route.id)
+                    continue
+                outs.append((
+                    route.destination_id,
+                    route.cost * (1 + _w * edge_risk(route, disruptions)),
+                ))
+            return outs
+
+        result = ucs(request.origin_id, request.destination_id, neighbors)
+        path_nodes = result[0] if result else None
+
+        edge_rows: list[dict] = []
+        total_cost = 0.0
+        regret = 0.0
+        if path_nodes and len(path_nodes) >= 2:
+            for u, v in zip(path_nodes[:-1], path_nodes[1:], strict=True):
+                options = [
+                    r for r in p.adjacency.get(u, [])
+                    if r.destination_id == v and route_is_compliant(r, shipment)
+                ]
+                if not options:
+                    continue
+                chosen = min(
+                    options,
+                    key=lambda r: r.cost * (1 + weight * edge_risk(r, disruptions)),
+                )
+                risk = edge_risk(chosen, disruptions)
+                edge_rows.append({
+                    "route_id": chosen.id,
+                    "origin": u,
+                    "destination": v,
+                    "base_cost": chosen.cost,
+                    "risk": round(risk, 4),
+                    "weighted_cost": round(chosen.cost * (1 + weight * risk), 3),
+                    "time_hours": chosen.time_hours,
+                })
+                total_cost += chosen.cost
+                regret += chosen.cost * risk
+
+        plan = Plan(
+            shipment_id=shipment.id,
+            route_ids=[e["route_id"] for e in edge_rows],
+            total_cost=total_cost,
+            expected_regret=regret,
+        )
+        candidates.append({
+            "risk_weight": weight,
+            "path_nodes": path_nodes,
+            "edges": edge_rows,
+            "total_cost": round(total_cost, 3),
+            "expected_regret": round(regret, 4),
+            "blocked_edges": blocked,
+            "non_compliant_edges": non_compliant,
+            "_plan": plan,
+        })
+
+    frontier_plans = frontier([c["_plan"] for c in candidates])
+    frontier_keys = {(pl.total_cost, pl.expected_regret) for pl in frontier_plans}
+    for c in candidates:
+        c["on_frontier"] = (c["_plan"].total_cost, c["_plan"].expected_regret) in frontier_keys
+        del c["_plan"]
+
+    return {
+        "origin": request.origin_id,
+        "destination": request.destination_id,
+        "risk_grid": list(grid),
+        "candidates": candidates,
+    }
 
 
 @app.get("/v1/pareto", dependencies=[Depends(auth)])
@@ -274,211 +444,6 @@ def truck_classes():
         {"key": k, **v}
         for k, v in TRUCK_CLASSES.items()
     ]
-
-
-@app.post("/v1/plan/compare", dependencies=[Depends(auth)])
-def compare_algorithms(request: CompareRequest):
-    shipment = store.shipments.get(request.shipment_id)
-    if shipment is None:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-    p = planner()
-    disruptions = store.disruptions
-    start = shipment.origin_id
-    goal = shipment.destination_id
-
-    def base_neighbors(node: str) -> list[tuple[str, float]]:
-        return [
-            (route.destination_id, route.cost)
-            for route in p.adjacency.get(node, [])
-            if route_is_compliant(route, shipment)
-            and not any(d.edge_id == route.id and d.severity >= 1 for d in disruptions)
-        ]
-
-    coordinates = {d.id: (d.latitude, d.longitude) for d in store.graph.depots}
-    try:
-        h = great_circle_heuristic(coordinates, goal)
-    except Exception:
-        def h(_: Any) -> float:
-            return 0.0
-
-    def calc_cost(path: list[str] | None) -> float | None:
-        if not path or len(path) < 2:
-            return 0.0 if path else None
-        total = 0.0
-        for u, v in zip(path[:-1], path[1:], strict=True):
-            edges = [r for r in p.adjacency.get(u, []) if r.destination_id == v]
-            if edges:
-                total += min(r.cost for r in edges)
-        return total
-
-    def bfs_algo(neighbors):
-        return bfs(start, goal, neighbors)
-
-    def dfs_algo(neighbors):
-        return dfs(start, goal, neighbors)
-
-    def ucs_algo(neighbors):
-        res = ucs(start, goal, neighbors)
-        return res[0] if res else None
-
-    def astar_algo(neighbors):
-        res = astar(start, goal, neighbors, h)
-        return res[0] if res else None
-
-    def greedy_algo(neighbors):
-        return greedy_best_first(start, goal, neighbors, h)
-
-    def hill_climbing_algo(neighbors):
-        return hill_climbing(start, goal, neighbors, h, maximizing=False)
-
-    algos = [
-        ("bfs", bfs_algo),
-        ("dfs", dfs_algo),
-        ("ucs", ucs_algo),
-        ("astar", astar_algo),
-        ("greedy", greedy_algo),
-        ("hill_climbing", hill_climbing_algo),
-    ]
-
-    results = []
-    for name, run_fn in algos:
-        explored: set[str] = set()
-
-        def n_wrap(node: str, _n=base_neighbors, _exp=explored) -> list[tuple[str, float]]:
-            _exp.add(node)
-            return _n(node)
-
-        t0 = time.perf_counter()
-        try:
-            path = run_fn(n_wrap)
-        except Exception:
-            path = None
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-
-        cost = calc_cost(path)
-        results.append({
-            "algorithm": name,
-            "path": path,
-            "cost": cost,
-            "nodes_explored": len(explored),
-            "time_ms": round(elapsed_ms, 3),
-            "path_length": len(path) if path else 0,
-        })
-
-    return results
-
-
-@app.post("/v1/plan/trace", dependencies=[Depends(auth)])
-def plan_trace(request: TraceRequest):
-    shipment = store.shipments.get(request.shipment_id)
-    if shipment is None:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-    p = planner()
-    disruptions = store.disruptions
-    start = shipment.origin_id
-    goal = shipment.destination_id
-    algo = request.algorithm.lower()
-
-    def base_neighbors(node: str) -> list[tuple[str, float]]:
-        return [
-            (route.destination_id, route.cost)
-            for route in p.adjacency.get(node, [])
-            if route_is_compliant(route, shipment)
-            and not any(d.edge_id == route.id and d.severity >= 1 for d in disruptions)
-        ]
-
-    coordinates = {d.id: (d.latitude, d.longitude) for d in store.graph.depots}
-    try:
-        h = great_circle_heuristic(coordinates, goal)
-    except Exception:
-        def h(_: Any) -> float:
-            return 0.0
-
-    steps = []
-    step_idx = 0
-    final_path = None
-    final_cost = None
-
-    if algo == "dfs":
-        stack = [(start, None, 0.0, [start])]
-        seen = {start}
-        while stack:
-            node, parent, cost, path = stack.pop()
-            is_goal = (node == goal)
-            steps.append({
-                "step": step_idx,
-                "node": node,
-                "parent": parent,
-                "cost_so_far": cost,
-                "frontier_size": len(stack),
-                "is_goal": is_goal,
-            })
-            step_idx += 1
-            if is_goal:
-                final_path = path
-                final_cost = cost
-                break
-            for child, edge_cost in reversed(base_neighbors(node)):
-                if child not in seen:
-                    seen.add(child)
-                    stack.append((child, node, cost + edge_cost, path + [child]))
-    elif algo in ("ucs", "astar"):
-        pq_frontier = [(h(start) if algo == "astar" else 0.0, 0.0, start, None, [start])]
-        best = {start: 0.0}
-        while pq_frontier:
-            _, cost, node, parent, path = heapq.heappop(pq_frontier)
-            is_goal = (node == goal)
-            steps.append({
-                "step": step_idx,
-                "node": node,
-                "parent": parent,
-                "cost_so_far": cost,
-                "frontier_size": len(pq_frontier),
-                "is_goal": is_goal,
-            })
-            step_idx += 1
-            if is_goal:
-                final_path = path
-                final_cost = cost
-                break
-            if cost > best.get(node, float("inf")):
-                continue
-            for child, edge_cost in base_neighbors(node):
-                cand = cost + edge_cost
-                if cand < best.get(child, float("inf")):
-                    best[child] = cand
-                    prio = cand + (h(child) if algo == "astar" else 0.0)
-                    heapq.heappush(pq_frontier, (prio, cand, child, node, path + [child]))
-    else:  # default bfs
-        queue = deque([(start, None, 0.0, [start])])
-        seen = {start}
-        while queue:
-            node, parent, cost, path = queue.popleft()
-            is_goal = (node == goal)
-            steps.append({
-                "step": step_idx,
-                "node": node,
-                "parent": parent,
-                "cost_so_far": cost,
-                "frontier_size": len(queue),
-                "is_goal": is_goal,
-            })
-            step_idx += 1
-            if is_goal:
-                final_path = path
-                final_cost = cost
-                break
-            for child, edge_cost in base_neighbors(node):
-                if child not in seen:
-                    seen.add(child)
-                    queue.append((child, node, cost + edge_cost, path + [child]))
-
-    return {
-        "algorithm": algo,
-        "steps": steps,
-        "final_path": final_path,
-        "final_cost": final_cost,
-    }
 
 
 @app.websocket("/v1/stream/simulation")

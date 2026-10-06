@@ -3,6 +3,8 @@ from __future__ import annotations
 from aegis_core.domain.models import Disruption, GraphInput, Shipment
 from pydantic import BaseModel, Field
 
+from .fuel_service import StateBreakdown as StateFuelBreakdown
+
 # ---------------------------------------------------------------------------
 # Indian-standard truck classes (MoRTH / CMVR 1989 categories)
 # ---------------------------------------------------------------------------
@@ -73,24 +75,21 @@ class PlanRequest(BaseModel):
         ),
     )
 
-
-class CompareRequest(BaseModel):
-    shipment_id: str
-
-
-class TraceRequest(BaseModel):
-    shipment_id: str
-    algorithm: str = "ucs"
+    # Fuel / propulsion type
+    fuel_type: str = Field(
+        default="diesel",
+        description="Propulsion type: diesel | petrol | electric",
+    )
 
 
-class BenchmarkResult(BaseModel):
-    plan_id: str
-    aegis_cost: float
-    aegis_regret: float
-    ortools_cost: float | None = None
-    ortools_regret: float | None = None
-    cost_delta_pct: float | None = None
-    regret_delta_pct: float | None = None
+class AegisTraceRequest(BaseModel):
+    """Scenario for the AEGIS planning pipeline visualiser — no stored
+    shipment needed; the planner is traced directly on this corridor."""
+    origin_id: str
+    destination_id: str
+    goods_type: str = "general"
+    weight_kg: float = Field(default=1000, gt=0)
+    disruptions: list[Disruption] = Field(default_factory=list)
 
 
 class DisruptionInfo(BaseModel):
@@ -104,7 +103,7 @@ class DisruptionInfo(BaseModel):
 
 
 class PlanResponse(BaseModel):
-    """Extended plan with truck‑aware capacity info, potential risks, and best‑route flag."""
+    """Extended plan with truck-aware capacity info, fuel costs, risks, best-route flag."""
     id: str
     shipment_id: str
     route_ids: list[str]
@@ -117,11 +116,32 @@ class PlanResponse(BaseModel):
     max_payload_kg: int
     gross_vehicle_weight_kg: int
     cargo_weight_kg: float
-    capacity_utilisation_pct: float   # cargo_weight / max_payload  × 100
+    capacity_utilisation_pct: float
+
+    # Fuel / operating cost breakdown
+    fuel_type: str = "diesel"
+    fuel_cost_inr: float = 0.0
+    fuel_consumption: float = 0.0
+    fuel_unit: str = "litres"
+    fuel_price_per_unit: float = 0.0
+    toll_cost_inr: float = 0.0
+    driver_cost_inr: float = 0.0
+    total_operating_cost_inr: float = 0.0
+    market_freight_cost_inr: float = 0.0
+    distance_km: float = 0.0
+
+    # EV-specific fields
+    ev_charging_stops: int = 0
+    ev_charging_stop_nodes: list[str] = Field(default_factory=list)
+    ev_charger_available: bool = True
+    ev_range_km: float = 0.0
+
+    # State-wise economics (fuel VAT / road quality / tolls differ by state)
+    state_breakdown: list[StateFuelBreakdown] = Field(default_factory=list)
 
     # Risk intelligence
     potential_risks: list[DisruptionInfo] = Field(default_factory=list)
-    risk_score: float = 0.0           # aggregate 0‑1 severity score for the route
+    risk_score: float = 0.0
 
     # Recommendation
     is_best: bool = False
@@ -129,14 +149,13 @@ class PlanResponse(BaseModel):
 
 
 __all__ = [
-    "BenchmarkResult",
-    "CompareRequest",
+    "AegisTraceRequest",
     "DisruptionInfo",
     "Disruption",
     "GraphInput",
     "PlanRequest",
     "PlanResponse",
     "Shipment",
-    "TraceRequest",
+    "StateFuelBreakdown",
     "TRUCK_CLASSES",
 ]
