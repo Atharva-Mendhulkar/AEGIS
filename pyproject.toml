@@ -1,6 +1,12 @@
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = [
+    "generate_full_report.py",
+    "generate_academic_figures.py",
+    "generate_documents.py",
+    "build_review_document.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

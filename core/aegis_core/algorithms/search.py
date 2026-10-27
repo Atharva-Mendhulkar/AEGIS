@@ -5,7 +5,7 @@ import math
 import random
 from collections import deque
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 Node = TypeVar("Node", bound=str)
 Neighbors = Callable[[Node], list[tuple[Node, float]]]
@@ -440,7 +440,7 @@ def find_path(
     heuristic: Heuristic | None = None,
     backward_neighbors: Neighbors[Node] | None = None,
     backward_heuristic: Heuristic | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> tuple[list[Node], float] | None:
     """Unified search entry point for AEGIS routing.
 

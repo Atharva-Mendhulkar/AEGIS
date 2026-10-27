@@ -13,7 +13,7 @@
 
 | **Project Team Members** | **Review & Supervision Credentials** |
 | :--- | :--- |
-| • **24BIT0244** – Atharva Phalak<br/>• **24BIT0091** – Aakash Sehgal<br/>• **24BIT0103** – Atharva Mendhulkar | • **Course Code:** BITE308L — Artificial Intelligence<br/>• **Slot / Team:** E2+TE2 / Team 27<br/>• **Faculty In-Charge:** Dr. Hemalatha S, Professor, SCORE |
+| • **24BIT0244** – Atharva Phalak<br/>• **24BIT0091** – Aakash Sehgal<br/>• **24BIT0103** – Atharva Mendhulkar | • **Course Code:** BITE308L — Artificial Intelligence<br/>• **Slot / Team:** E2+TE2 / Team 12<br/>• **Faculty In-Charge:** Dr. Hemalatha S, Professor, SCORE |
 
 ---
 

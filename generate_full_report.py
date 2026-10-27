@@ -307,7 +307,7 @@ def build_pdf():
             Paragraph(
                 "<b>Review &amp; Supervision Credentials:</b><br/>"
                 "&bull; <b>Course Code:</b> BITE308L &mdash; Artificial Intelligence<br/>"
-                "&bull; <b>Slot / Team:</b> E2+TE2 / Team 27<br/>"
+                "&bull; <b>Slot / Team:</b> E2+TE2 / Team 12<br/>"
                 "&bull; <b>Faculty In-Charge:</b> Dr. Hemalatha S, Professor, SCORE",
                 meta_cell_style
             )

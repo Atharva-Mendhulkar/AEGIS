@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
 State = TypeVar("State")
@@ -11,8 +11,8 @@ def minimax(
     state: State,
     depth: int,
     is_maximizing: bool,
-    get_actions: Callable[[State], list[Action]],
-    apply_action: Callable[[State, Action], State],
+    get_actions: Callable[[State], Sequence[Action]],
+    apply_action: Callable[[State, Any], State],
     evaluate: Callable[[State], float],
     is_terminal: Callable[[State], bool] | None = None,
 ) -> tuple[float, Action | None]:
@@ -71,8 +71,8 @@ def alpha_beta(
     alpha: float,
     beta: float,
     is_maximizing: bool,
-    get_actions: Callable[[State], list[Action]],
-    apply_action: Callable[[State, Action], State],
+    get_actions: Callable[[State], Sequence[Action]],
+    apply_action: Callable[[State, Any], State],
     evaluate: Callable[[State], float],
     is_terminal: Callable[[State], bool] | None = None,
 ) -> tuple[float, Action | None]:
