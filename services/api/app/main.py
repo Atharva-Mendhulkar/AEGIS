@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from aegis_core import Disruption, ResiliencePlanner
-from aegis_core.algorithms.search import haversine_km, ucs
+from aegis_core.algorithms.search import find_path, haversine_km
 from aegis_core.domain.models import GraphInput, Plan, PlanStatus, Shipment
 from aegis_core.services.compliance import route_is_compliant
 from aegis_core.services.pareto import frontier
@@ -214,7 +214,7 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
     # ── Run AEGIS planner (full Pareto frontier) ─────────────────────────
     disruptions = request.disruptions if request.disruptions else store.disruptions
     try:
-        raw_plans = planner().frontier(shipment, disruptions)
+        raw_plans = planner().frontier(shipment, disruptions, algorithm=request.algorithm)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -246,6 +246,7 @@ def create_plan(request: PlanRequest) -> list[PlanResponse]:
             total_cost=plan.total_cost,
             expected_regret=plan.expected_regret,
             status=plan.status,
+            algorithm=request.algorithm,
             truck_class=request.truck_class,
             max_payload_kg=max_payload_kg,
             gross_vehicle_weight_kg=gvw_kg,
@@ -376,7 +377,12 @@ def aegis_trace(request: AegisTraceRequest) -> dict:
                 ))
             return outs
 
-        result = ucs(request.origin_id, request.destination_id, neighbors)
+        result = find_path(
+            request.origin_id,
+            request.destination_id,
+            neighbors,
+            algorithm=request.algorithm,
+        )
         path_nodes = result[0] if result else None
 
         edge_rows: list[dict] = []

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from aegis_core.algorithms.search import Heuristic, ucs
+from aegis_core.algorithms.search import Heuristic, find_path, great_circle_heuristic
 from aegis_core.domain.models import Disruption, GraphInput, Plan, Route, Shipment
 from aegis_core.services.compliance import route_is_compliant
 from aegis_core.services.risk import edge_risk
@@ -15,8 +15,13 @@ class ResiliencePlanner:
         self.graph = graph
         self.routes = {route.id: route for route in graph.routes}
         self.adjacency: dict[str, list[Route]] = defaultdict(list)
+        self.reverse_adjacency: dict[str, list[Route]] = defaultdict(list)
         for route in graph.routes:
             self.adjacency[route.origin_id].append(route)
+            self.reverse_adjacency[route.destination_id].append(route)
+        self.depot_coords: dict[str, tuple[float, float]] = {
+            depot.id: (depot.latitude, depot.longitude) for depot in graph.depots
+        }
 
     def plan(
         self,
@@ -24,14 +29,29 @@ class ResiliencePlanner:
         disruptions: list[Disruption] | None = None,
         risk_weight: float = 0.0,
         heuristic: Heuristic | None = None,
+        algorithm: str = "astar",
     ) -> Plan:
-        """Plan a route for ``shipment``.
+        """Plan a route for ``shipment`` using the chosen search algorithm.
 
-        With ``heuristic`` supplied the underlying search becomes A* over an
-        admissible estimator (e.g. great-circle distance); with ``None`` it is
-        plain uniform-cost search, preserving existing behaviour.
+        Supports A*, Bidirectional A*, UCS/Dijkstra, IDA*, BFS, DFS, IDDFS,
+        and Greedy search. When ``algorithm='astar'`` and no custom heuristic
+        is provided, an admissible great-circle geodetic heuristic is
+        automatically derived from depot coordinates.
         """
         disruptions = disruptions or []
+
+        # Auto-construct admissible great-circle heuristic if none provided
+        backward_h: Heuristic | None = None
+        heuristic_algos = ("astar", "bidirectional_astar", "ida_star", "greedy")
+        if heuristic is None and algorithm in heuristic_algos:
+            if shipment.destination_id in self.depot_coords:
+                heuristic = great_circle_heuristic(
+                    self.depot_coords, shipment.destination_id, base_cost_per_km=0.01
+                )
+            if shipment.origin_id in self.depot_coords:
+                backward_h = great_circle_heuristic(
+                    self.depot_coords, shipment.origin_id, base_cost_per_km=0.01
+                )
 
         def neighbors(node: str) -> list[tuple[str, float]]:
             return [
@@ -44,7 +64,26 @@ class ResiliencePlanner:
                 and not any(d.edge_id == route.id and d.severity >= 1 for d in disruptions)
             ]
 
-        result = ucs(shipment.origin_id, shipment.destination_id, neighbors, heuristic)
+        def backward_neighbors(node: str) -> list[tuple[str, float]]:
+            return [
+                (
+                    route.origin_id,
+                    route.cost * (1 + risk_weight * edge_risk(route, disruptions)),
+                )
+                for route in self.reverse_adjacency[node]
+                if route_is_compliant(route, shipment)
+                and not any(d.edge_id == route.id and d.severity >= 1 for d in disruptions)
+            ]
+
+        result = find_path(
+            start=shipment.origin_id,
+            goal=shipment.destination_id,
+            neighbors=neighbors,
+            algorithm=algorithm,
+            heuristic=heuristic,
+            backward_neighbors=backward_neighbors,
+            backward_heuristic=backward_h,
+        )
         if result is None:
             raise ValueError("No feasible compliant route exists for shipment")
         nodes, _ = result
@@ -70,6 +109,7 @@ class ResiliencePlanner:
         disruptions: list[Disruption] | None = None,
         risk_weights: tuple[float, ...] | None = None,
         heuristic: Heuristic | None = None,
+        algorithm: str = "astar",
     ) -> list[Plan]:
         """Enumerate candidate plans at several risk weights and return the
         Pareto non-dominated subset on ``(total_cost, expected_regret)``.
@@ -81,7 +121,10 @@ class ResiliencePlanner:
         from aegis_core.services.pareto import frontier as _pareto_frontier
 
         grid = risk_weights if risk_weights is not None else self.DEFAULT_RISK_GRID
-        candidates = [self.plan(shipment, disruptions, w, heuristic) for w in grid]
+        candidates = [
+            self.plan(shipment, disruptions, w, heuristic, algorithm=algorithm)
+            for w in grid
+        ]
         return _pareto_frontier(candidates)
 
     def _edges_for(

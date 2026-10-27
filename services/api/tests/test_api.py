@@ -78,13 +78,40 @@ def test_plan_with_inline_disruptions_and_clear() -> None:
             {"id": "c", "name": "C", "latitude": 0.5, "longitude": 0.5},
         ],
         "routes": [
-            {"id": "ab", "origin_id": "a", "destination_id": "b", "cost": 5, "time_hours": 2, "risk_prior": 0.05},
-            {"id": "ac", "origin_id": "a", "destination_id": "c", "cost": 3, "time_hours": 1, "risk_prior": 0.01},
-            {"id": "cb", "origin_id": "c", "destination_id": "b", "cost": 3, "time_hours": 1, "risk_prior": 0.01},
+            {
+                "id": "ab",
+                "origin_id": "a",
+                "destination_id": "b",
+                "cost": 5,
+                "time_hours": 2,
+                "risk_prior": 0.05,
+            },
+            {
+                "id": "ac",
+                "origin_id": "a",
+                "destination_id": "c",
+                "cost": 3,
+                "time_hours": 1,
+                "risk_prior": 0.01,
+            },
+            {
+                "id": "cb",
+                "origin_id": "c",
+                "destination_id": "b",
+                "cost": 3,
+                "time_hours": 1,
+                "risk_prior": 0.01,
+            },
         ],
     }
     assert client.post("/v1/graph", json=graph, headers=headers).status_code == 200
-    shipment = {"id": "s_detour", "origin_id": "a", "destination_id": "b", "goods_type": "general", "weight_kg": 100}
+    shipment = {
+        "id": "s_detour",
+        "origin_id": "a",
+        "destination_id": "b",
+        "goods_type": "general",
+        "weight_kg": 100,
+    }
     assert client.post("/v1/shipments", json=[shipment], headers=headers).status_code == 200
 
     # Without disruption: direct route ab is optimal (cost 5)
@@ -111,3 +138,25 @@ def test_plan_with_inline_disruptions_and_clear() -> None:
     del_res = client.delete("/v1/disrupt", headers=headers)
     assert del_res.status_code == 200
     assert del_res.json() == {"status": "cleared"}
+
+
+def test_plan_with_algorithm_selection() -> None:
+    res = client.post(
+        "/v1/plan",
+        json={"shipment_id": "s_detour", "algorithm": "astar"},
+        headers=headers,
+    )
+    assert res.status_code == 200
+    plans = res.json()
+    assert len(plans) >= 1
+    assert plans[0]["algorithm"] == "astar"
+
+    # Also test bidirectional_astar and ucs
+    res_bi = client.post(
+        "/v1/plan",
+        json={"shipment_id": "s_detour", "algorithm": "bidirectional_astar"},
+        headers=headers,
+    )
+    assert res_bi.status_code == 200
+    assert res_bi.json()[0]["algorithm"] == "bidirectional_astar"
+

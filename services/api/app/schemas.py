@@ -87,6 +87,15 @@ class PlanRequest(BaseModel):
         description="Optional inline disruptions for scenario replanning",
     )
 
+    # Search algorithm selection
+    algorithm: str = Field(
+        default="astar",
+        description=(
+            "Search algorithm: astar | ucs | dijkstra | bidirectional_astar | "
+            "bidirectional_ucs | ida_star | bfs | dfs | iddfs | greedy"
+        ),
+    )
+
 
 class AegisTraceRequest(BaseModel):
     """Scenario for the AEGIS planning pipeline visualiser — no stored
@@ -96,6 +105,13 @@ class AegisTraceRequest(BaseModel):
     goods_type: str = "general"
     weight_kg: float = Field(default=1000, gt=0)
     disruptions: list[Disruption] = Field(default_factory=list)
+    algorithm: str = Field(
+        default="astar",
+        description=(
+            "Search algorithm: astar | ucs | dijkstra | bidirectional_astar | "
+            "bidirectional_ucs | ida_star | bfs | dfs | iddfs | greedy"
+        ),
+    )
 
 
 class DisruptionInfo(BaseModel):
@@ -116,6 +132,7 @@ class PlanResponse(BaseModel):
     total_cost: float
     expected_regret: float
     status: str
+    algorithm: str = "astar"
 
     # Truck / capacity metadata
     truck_class: str
